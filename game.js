@@ -157,22 +157,56 @@ window.joinRoom = async function() {
     }
 };
 
+// ====== オフライン用のゲーム開始処理 ======
 window.startOfflineGame = function(selectedDeck) {
     document.getElementById('app-container').style.display = 'flex';
+    
+    // CPU対戦の場合は online フラグを確実に切る
+    isOnlineMode = false;
+    
     const isYouFirst = Math.random() < 0.5;
     myColor = isYouFirst ? 'yellow' : 'purple';
     
-    const oppChoices = ['287期受験生', '幻影旅団'];
-    const oppDeck = oppChoices[Math.floor(Math.random() * oppChoices.length)];
-    
-    masterDecks = {
-        yellow: myColor === 'yellow' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck),
-        purple: myColor === 'purple' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck)
-    };
-    
-    initGameStateAndUI();
+    // UIを初期化
+    setupUIAndDecks(myColor, selectedDeck, 'random');
     startMulliganPhase();
 };
+
+// ====== startTurn 関数の修正 ======
+function startTurn() {
+    actionUsedThisTurn = false; 
+    usedThinkThisTurn = false;
+    window.selectedHandIndex = null; 
+    updateBoardPerspective(); 
+    
+    // （中略：バフ処理など）
+    
+    drawCards(currentPlayer, 4); updateHPUI();
+    document.querySelectorAll('.highlight-box').forEach(el => el.remove()); svgGroup.innerHTML = '';
+    
+    clearInterval(timerId); 
+    timeLeft = 30; 
+    timeLeftDisplay.textContent = timeLeft;
+    
+    const isMe = (currentPlayer === myColor); 
+    logDisplay.textContent = ""; 
+    renderBoard(); 
+    renderHands();
+    
+    // CPU対戦の時のみ、相手のターンに自動操作を呼び出す
+    if (!isMe && !isOnlineMode) { 
+        setTimeout(autoPlayOpponent, 1500); 
+        return; 
+    }
+    
+    // オンラインの時はFirebaseの動きを待つ（CPUは動かさない）
+    if (isMe) {
+        timerId = setInterval(async () => { 
+            timeLeft--; timeLeftDisplay.textContent = timeLeft; 
+            // （以下、時間切れ処理）
+        }, 1000);
+    }
+}
 
 window.startOnlineGame = function(assignedColor, myDeckData, oppDeckData) {
     document.getElementById('app-container').style.display = 'flex';
