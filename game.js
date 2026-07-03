@@ -179,7 +179,21 @@ function startTurn() {
     window.selectedHandIndex = null; 
     updateBoardPerspective(); 
     
-    // （中略：バフ処理など）
+    activeEffects.forEach(effect => {
+        if (effect.player !== currentPlayer) {
+            if (effect.turnsLeft > 0) effect.turnsLeft--;
+        }
+        if (effect.player === currentPlayer && effect.turnsLeft > 0) {
+            if (effect.type === 'buff_random') {
+                const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+                const chars = hand.filter(c => c && c.type === 'character');
+                if (chars.length > 0) {
+                    const target = chars[Math.floor(Math.random() * chars.length)];
+                    target.atk += effect.amount;
+                }
+            }
+        }
+    });
     
     drawCards(currentPlayer, 4); updateHPUI();
     document.querySelectorAll('.highlight-box').forEach(el => el.remove()); svgGroup.innerHTML = '';
