@@ -198,27 +198,75 @@ function startTurn() {
     drawCards(currentPlayer, 4); updateHPUI();
     document.querySelectorAll('.highlight-box').forEach(el => el.remove()); svgGroup.innerHTML = '';
     
-    clearInterval(timerId); 
-    timeLeft = 30; 
-    timeLeftDisplay.textContent = timeLeft;
-    
-    const isMe = (currentPlayer === myColor); 
+    clearInterval(timerId); timeLeft = 30; timeLeftDisplay.textContent = timeLeft;
+    const isMe = currentPlayer === myColor; 
     logDisplay.textContent = ""; 
-    renderBoard(); 
-    renderHands();
+    renderBoard(); renderHands();
     
-    // CPU対戦の時のみ、相手のターンに自動操作を呼び出す
+    // オフラインモードでCPUのターンの場合
     if (!isMe && !isOnlineMode) { 
         setTimeout(autoPlayOpponent, 1500); 
         return; 
     }
-    
-    // オンラインの時はFirebaseの動きを待つ（CPUは動かさない）
-    if (isMe) {
-        timerId = setInterval(async () => { 
-            timeLeft--; timeLeftDisplay.textContent = timeLeft; 
-            // （以下、時間切れ処理）
-        }, 1000);
+
+    // タイマーは自分も相手も両方動かす（画面の見た目を合わせるため）
+    timerId = setInterval(async () => { 
+        timeLeft--; timeLeftDisplay.textContent = timeLeft; 
+        if (timeLeft <= 0) {
+            clearInterval(timerId);
+            
+            // 時間切れの処理は「現在操作する権利がある人（自分）」だけが発火させる
+            if (isMe) {
+                if (window.isHandSelecting && window.autoSelectAndResolve) {
+                    window.autoSelectAndResolve();
+                } else if (window.isBoardTargeting && window.autoResolveBoardTarget) {
+                    window.autoResolveBoardTarget();
+                } else if (!window.isBoardSelecting && !actionUsedThisTurn) {
+                    autoPlayTimeout(); 
+                }
+            }
+        }
+    }, 1000);
+}
+
+// タイムアウト時のオートプレイ（ネットワーク同期を含む）
+async function autoPlayTimeout() {
+    logDisplay.textContent = "時間切れ！自動で配置します。";
+    window.isBoardSelecting = true;
+    try {
+        const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
+        const chars = hand.filter(c => c && c.type === 'character');
+        
+        if (chars.length > 0) {
+            // ランダムに選んだキャラが置ける場所を探す
+            for(let c of chars) {
+                let validMoves = [];
+                for (let i = 0; i < 36; i++) {
+                    if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
+                }
+                if (validMoves.length > 0) {
+                    let moveIndex = validMoves[Math.floor(Math.random() * validMoves.length)];
+                    window.selectedHandIndex = hand.indexOf(c);
+                    let targetData = getCPUTargetData(c, window.selectedHandIndex, hand, oppHand);
+                    
+                    // isTimeout フラグ（引数の最後）を true にして配置
+                    await placeStone(moveIndex, false, { handIndex: window.selectedHandIndex, targets: targetData }, true);
+                    return;
+                }
+            }
+        }
+        logDisplay.textContent = "配置可能キャラなし！パスします。";
+        
+        // 配置可能なキャラがいない場合、オンラインなら「パスしたこと」を相手に送る
+        if (isOnlineMode) {
+            sendMoveToFirebase('passTurn', {});
+        }
+    } finally {
+        if (window.isBoardSelecting) {
+            window.isBoardSelecting = false;
+            setTimeout(checkGameOverAndChangeTurn, 1000);
+        }
     }
 }
 
@@ -285,9 +333,12 @@ function listenForOpponentMoves() {
             }
         } else if (move.type === 'placeStone') {
             window.selectedHandIndex = move.data.handIndex;
-            await placeStone(move.data.index, true, move.data);
+            await placeStone(move.data.index, true, move.data, false);
         } else if (move.type === 'playAction') {
-            await playActionCard(move.data.handIndex, true, move.data);
+            await playActionCard(move.data.handIndex, true, move.data, false);
+        } else if (move.type === 'passTurn') {
+            // ★追加：相手がパス（時間切れで置けない等）した時、ターンを交代する
+            checkGameOverAndChangeTurn();
         }
     });
 }
