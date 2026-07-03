@@ -130,28 +130,30 @@ window.createRoom = function() {
 window.joinRoom = async function() {
     const inputId = document.getElementById('room-id-input').value;
     if (!inputId) { alert("ルームIDを入力してください"); return; }
-    const roomRef = db.ref('rooms/' + inputId);
-    const snapshot = await roomRef.once('value');
-    const roomData = snapshot.val();
+    
+    // エラーハンドリングを追加して状況を確認できるようにする
+    try {
+        const roomRef = db.ref('rooms/' + inputId);
+        const snapshot = await roomRef.once('value');
+        const roomData = snapshot.val();
 
-    if (roomData && roomData.status === 'waiting') {
-        currentRoomId = inputId;
-        isHost = false;
-        await roomRef.update({ status: 'playing', guestDeckChoice: myDeckChoice });
-        document.getElementById('room-select-overlay').style.display = 'none';
-        document.getElementById('waiting-overlay').style.display = 'flex';
-        document.getElementById('display-room-id').textContent = "デッキ同期中...";
+        console.log("部屋データ:", roomData); // 画面が進まない時、ブラウザのF12コンソールに何が出るか確認してください
 
-        roomRef.on('value', (snap) => {
-            const data = snap.val();
-            if (data && data.decksGenerated) {
-                roomRef.off('value');
-                document.getElementById('waiting-overlay').style.display = 'none';
-                startOnlineGame('purple', data.decks.guest, data.decks.host);
-            }
-        });
-    } else {
-        alert("部屋が見つからないか、既に対戦中です。");
+        if (roomData && roomData.status === 'waiting') {
+            currentRoomId = inputId;
+            isHost = false;
+            await roomRef.update({ status: 'playing', guestDeckChoice: myDeckChoice });
+            
+            document.getElementById('room-select-overlay').style.display = 'none';
+            document.getElementById('waiting-overlay').style.display = 'flex';
+            document.getElementById('display-room-id').textContent = "デッキ同期中...";
+
+            // ...（以降のlisten処理）
+        } else {
+            alert("部屋が見つからないか、対戦相手が既に入室しています。");
+        }
+    } catch (e) {
+        alert("Firebase接続エラー: " + e.message); // キーが間違っているとここに出ます
     }
 };
 
