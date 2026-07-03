@@ -1,0 +1,135 @@
+body { font-family: sans-serif; background-color: #0d0d12; color: #fff; margin: 0; padding: 0; user-select: none; touch-action: none; overflow: hidden; display: flex; justify-content: center; }
+
+#app-container { width: 100%; max-width: 440px; height: 100vh; position: relative; display: flex; flex-direction: column; align-items: center; overflow: hidden; box-sizing: border-box; padding-top: 10px; }
+
+#deck-select-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; display: flex; justify-content: center; align-items: center; }
+.deck-select-modal { background: #1a1a2e; border: 2px solid #00d2ff; border-radius: 10px; padding: 20px; text-align: center; width: 300px; box-shadow: 0 0 20px rgba(0,210,255,0.5); }
+.deck-select-modal h2 { font-size: 18px; margin-bottom: 20px; letter-spacing: 1px; color: #fff; text-shadow: 0 0 5px #00d2ff;}
+.deck-btn { display: block; width: 100%; padding: 15px; margin-bottom: 15px; font-size: 16px; font-weight: bold; background: linear-gradient(to bottom, #0088cc, #002244); border: 1px solid #00d2ff; color: #fff; border-radius: 8px; cursor: pointer; text-shadow: 0 0 3px #00d2ff; }
+
+#board-perspective-wrapper { perspective: 900px; margin: auto 0; width: 100%; display: flex; justify-content: center; }
+#board-container { position: relative; width: 312px; height: 312px; transition: transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1); transform-origin: bottom center; }
+#board-container.tilted { transform: rotateX(35deg) translateY(-10px) scale(0.95); box-shadow: 0 25px 35px rgba(0,0,0,0.7); }
+
+#board { display: grid; grid-template-columns: repeat(6, 52px); grid-template-rows: repeat(6, 52px); background-color: #dfe7f0; background-image: linear-gradient(#b0c4de 1px, transparent 1px), linear-gradient(90deg, #b0c4de 1px, transparent 1px); background-size: 52px 52px; border: 2px solid #5a7b9c; border-radius: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.8); width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1;}
+#combo-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; overflow: visible; }
+
+.cell { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: background 0.1s; border: 1px solid rgba(0,0,0,0.05); box-sizing: border-box; position: relative; }
+.cell:hover { background-color: rgba(0,0,0,0.1); }
+
+/* フェイタン/ノブナガ継続効果の青光り */
+.active-buff-glow { box-shadow: inset 0 0 15px 5px #00d2ff, 0 0 10px 2px #00d2ff !important; border: 2px solid #00d2ff !important; z-index: 5;}
+
+.stone { width: 84%; height: 84%; transition: all 0.25s ease; display: flex; align-items: center; justify-content: center; font-size: 9px; background-size: cover; background-position: center; background-repeat: no-repeat; z-index: 3; }
+.stone.card-character, .stone.card-stone { border-radius: 50%; }
+.stone.yellow { border: 2px solid #ffd700; box-shadow: 0 0 6px #ffd700; }
+.stone.purple { border: 2px solid #a843ff; box-shadow: 0 0 6px #a843ff; }
+.card-stone.yellow { background: radial-gradient(circle, #ffd700, #b8860b); color: #fff; font-size: 16px; font-family: serif; text-shadow: 1px 1px 2px #000; }
+.card-stone.yellow::after { content: "XX"; }
+.card-stone.purple { background: radial-gradient(circle, #9370db, #4b0082); color: #fff; font-size: 18px; text-shadow: 1px 1px 2px #000; }
+.card-stone.purple::after { content: "🦍"; } 
+
+.highlight-box { position: absolute; width: 44px; height: 44px; border: 3px solid; box-sizing: border-box; border-radius: 4px; z-index: 2; pointer-events: none; }
+.hl-yellow { border-color: #ffd700; box-shadow: inset 0 0 10px #ffd700, 0 0 10px #ffd700; background: rgba(255, 215, 0, 0.25); }
+.hl-blue { border-color: #00d2ff; box-shadow: inset 0 0 10px #00d2ff, 0 0 10px #00d2ff; background: rgba(0, 210, 255, 0.25); }
+.hl-gray { border-color: #888; box-shadow: inset 0 0 10px #888, 0 0 10px #888; background: rgba(136, 136, 136, 0.3); }
+
+/* ダメージポップアップのカラー対応 */
+.damage-popup { position: absolute; font-size: 36px; font-weight: 900; color: #fff; text-shadow: 0 0 10px #ff0055, 0 0 20px #ff0055, 2px 2px 4px #000; z-index: 1000; pointer-events: none; opacity: 0; transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); transform: translate(-50%, -50%) scale(0.5); left: 50%; top: 50%; font-family: monospace; white-space: nowrap; }
+.damage-popup.heal { color: #2ecc71; text-shadow: 0 0 10px #2ecc71, 0 0 20px #2ecc71, 2px 2px 4px #000; }
+.damage-popup.reduce { color: #00d2ff; text-shadow: 0 0 10px #00d2ff, 0 0 20px #00d2ff, 2px 2px 4px #000; font-size: 28px; }
+.damage-popup.show { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+.damage-popup.fly-top { transform: translate(-50%, -350px) scale(0.6); opacity: 0; transition: all 0.4s ease-in; }
+.damage-popup.fly-bottom { transform: translate(-50%, 350px) scale(0.6); opacity: 0; transition: all 0.4s ease-in; }
+
+/* GP飛行用パーティクル */
+.gp-fly-particle { position: fixed; width: 15px; height: 15px; border-radius: 50%; z-index: 9999; box-shadow: 0 0 10px currentColor; pointer-events: none; transition: all 0.6s cubic-bezier(0.25, 1, 0.5, 1); }
+
+.hud-container { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 5px 15px; box-sizing: border-box; position: relative; z-index: 10; }
+.hud-center { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; position: relative; margin: 0 10px; }
+.hud-controls-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 2px; }
+
+.hud-diamonds { display: flex; gap: 4px; }
+.hud-diamond { width: 8px; height: 8px; background: #00d2ff; transform: rotate(45deg); box-shadow: 0 0 5px #00d2ff; border: 1px solid #fff; }
+.hud-diamond.used { background: #333; box-shadow: none; border: 1px solid #555; }
+
+.gp-hex-wrapper { filter: drop-shadow(0 0 3px rgba(255,255,255,0.5)); cursor: pointer; z-index: 15; position: relative;}
+.gp-hex-wrapper:active { transform: scale(0.95); }
+.gp-hex-inner { width: 90px; height: 28px; clip-path: polygon(15% 0, 85% 0, 100% 50%, 85% 100%, 15% 100%, 0 50%); display: flex; justify-content: center; align-items: center; font-weight: bold; letter-spacing: 2px; color: #fff; font-size: 14px;}
+.gp-btn-red { background: linear-gradient(to bottom, #d80032, #6a0018); text-shadow: 0 0 3px #ffaaaa; border-top: 1px solid #ff4d79; border-bottom: 1px solid #ff4d79; }
+.gp-btn-blue { background: linear-gradient(to bottom, #0088cc, #002244); text-shadow: 0 0 3px #00d2ff; border-top: 1px solid #00d2ff; border-bottom: 1px solid #00d2ff; }
+
+.turn-badge { font-size: 9px; font-weight: bold; padding: 2px 10px; clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%); border: 1px solid rgba(255,255,255,0.5); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); }
+.badge-yellow { background: linear-gradient(to bottom, #ffd700, #b8860b); color: #000; text-shadow: none; }
+.badge-purple { background: linear-gradient(to bottom, #a843ff, #4b0082); color: #fff; }
+
+.hp-bar-wrapper { width: 100%; background: #111; border: 1px solid #444; position: relative; height: 12px; clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%); z-index: 1; }
+.hp-bar-fill { height: 100%; background: linear-gradient(to right, #00ffcc, #0088ff); transition: width 0.3s; width: 100%; clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%); }
+.hp-text { position: absolute; top: -2px; left: 15px; font-size: 10px; font-weight: bold; text-shadow: 1px 1px 0 #000; z-index: 3; }
+.hp-bar-fill.purple-bar { background: linear-gradient(to right, #ff00aa, #aa00ff); }
+
+.hud-icon-diamond { width: 40px; height: 40px; background: linear-gradient(45deg, #005577, #001122); border: 2px solid #00d2ff; transform: rotate(45deg); display: flex; justify-content: center; align-items: center; cursor: pointer; box-shadow: inset 0 0 8px #00d2ff; position: relative; z-index: 10;}
+.hud-icon-inner { transform: rotate(-45deg); font-size: 18px; color: #00d2ff; }
+
+#time-container { position: absolute; left: 15px; bottom: 120px; display: flex; flex-direction: column; align-items: center; background: rgba(0,0,0,0.7); padding: 4px 10px; clip-path: polygon(20% 0, 80% 0, 100% 25%, 100% 75%, 80% 100%, 20% 100%, 0 75%, 0 25%); border: 1px solid #5a7b9c; z-index: 5; box-shadow: 0 0 10px rgba(0,210,255,0.3); }
+#timer-label { font-size: 8px; font-weight: bold; margin-bottom: -3px; color: #aaa; letter-spacing: 1px; }
+#timer-box { font-size: 18px; font-weight: bold; color: #fff; font-family: monospace; text-shadow: 0 0 5px #fff; }
+
+.hand-wrapper { position: relative; width: 100%; height: 85px; margin-bottom: 5px; box-sizing: border-box; }
+.hand-container { display: flex; gap: 6px; height: 100%; align-items: flex-end; justify-content: center; width: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+.hand-card { width: 65px; height: 65px; cursor: pointer; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; box-sizing: border-box; background-size: cover; background-position: center; background-repeat: no-repeat; box-shadow: 0 4px 8px rgba(0,0,0,0.5); transition: transform 0.2s ease; }
+.hand-card.card-character { border-radius: 50%; border: 2px solid #ccc; }
+.hand-card.card-action { clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); border: none; background-color: #4a3b5c; }
+
+.card-text-node { z-index: 5; text-shadow: 1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000, 0 0 4px #000; font-weight: bold; pointer-events: none; }
+.card-name { font-size: 8px; margin-top: 15px; text-align: center; max-width: 90%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-rank { position: absolute; left: 8px; top: 15px; color: #ff9800; font-size: 9px; font-style: italic; }
+.card-atk-badge { position: absolute; top: -5px; left: 50%; transform: translateX(-50%) rotate(45deg); width: 14px; height: 14px; background-color: #00bcd4; border: 1px solid #fff; z-index: 4; }
+.card-atk-badge.buffed { box-shadow: 0 0 6px 2px #ff9800; border-color: #ff9800; }
+/* デバフの光り方の修正（バッジの中身は青のまま、周りのみ紫） */
+.card-atk-badge.debuffed { box-shadow: 0 0 6px 2px #9c27b0; border-color: #9c27b0; background-color: #00bcd4; }
+
+/* マリガン用の六角形ボタン調整（必要に応じて追加） */
+#mulligan-ok-btn { margin-top: 15px; transform: scale(1.3); cursor: pointer; }
+.card-atk-text { position: absolute; top: -4px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #fff; z-index: 5; }
+.cost-container { position: absolute; top: 2px; left: 2px; display: flex; flex-direction: column; gap: 2px; z-index: 6; }
+.badge-specific { background-color: #2ecc71; color: #fff; border-radius: 50%; width: 12px; height: 12px; display: flex; align-items: center; justify-content: center; font-size: 7px; border: 1px solid #fff; }
+.badge-free { background-color: #7f8c8d; color: #fff; border-radius: 50%; width: 12px; height: 12px; display: flex; align-items: center; justify-content: center; font-size: 7px; border: 1px solid #fff; }
+
+.hand-card.selected { transform: scale(1.15) translateY(-10px); border: 2px solid #00d2ff; box-shadow: 0 0 15px #00d2ff; z-index: 10; }
+.hand-card.inactive { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+.hand-card.cost-shortage { border: 2px dashed #ff4d4d; opacity: 0.7;}
+
+.hidden-char { width: 50px; height: 50px; border-radius: 50%; background: radial-gradient(circle, #555, #111); border: 2px solid #333; box-shadow: inset 0 0 10px #000; }
+.hidden-action { width: 50px; height: 55px; background: radial-gradient(circle, #555, #111); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); border: 2px solid #333; box-shadow: inset 0 0 10px #000; }
+
+#log-display { font-size: 11px; color: #ffeb3b; height: 15px; font-weight: bold; text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; margin-bottom: 2px; }
+
+.gp-pool-panel { display: none; position: absolute; left: 0; width: 100%; height: auto; background: rgba(10, 10, 20, 0.85); backdrop-filter: blur(3px); z-index: 20; border: 1px solid #5a7b9c; border-radius: 4px; flex-direction: column; padding: 5px; box-sizing: border-box; box-shadow: 0 0 15px rgba(0,0,0,0.8); }
+.gp-pool-panel.top { top: 0; }
+.gp-pool-panel.bottom { bottom: 0; }
+.gp-list { display: flex; flex-direction: column; gap: 4px; padding: 0 10px; }
+.gp-item-row { display: flex; align-items: center; font-size: 12px; }
+.gp-icon-circle { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #fff; display: flex; justify-content: center; align-items: center; margin-right: 6px; font-weight: bold; font-size: 9px; color: #fff; }
+.gp-amt { font-size: 14px; font-weight: bold; font-family: monospace; margin-right: 8px; width: 15px; text-align: right; }
+.gp-diamonds { display: flex; gap: 3px; flex-wrap: wrap; flex-grow: 1; max-width: 100%; }
+.gp-pool-diamond { width: 8px; height: 8px; transform: rotate(45deg); box-shadow: 0 0 2px currentColor; border: 1px solid rgba(255,255,255,0.3); }
+.gp-pool-footer { width: 100%; font-size: 10px; text-align: center; color: #00d2ff; padding-top: 4px; margin-top: 4px; border-top: 1px solid rgba(0, 210, 255, 0.3); font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#mulligan-overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10, 10, 20, 0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; }
+#mulligan-title { font-size: 16px; margin-bottom: 20px; font-weight: bold; border-bottom: 1px solid #00d2ff; padding-bottom: 5px; letter-spacing: 2px; }
+.mulligan-grid { display: grid; grid-template-columns: 75px 75px 75px; grid-template-rows: 75px 75px 75px; gap: 5px; margin-bottom: 30px; }
+.mul-pos { display: flex; justify-content: center; align-items: center; }
+#mul-top { grid-column: 2; grid-row: 1; } #mul-left { grid-column: 1; grid-row: 2; }
+#mul-right { grid-column: 3; grid-row: 2; } #mul-bottom { grid-column: 2; grid-row: 3; }
+.mulligan-selected { border: 3px solid #00d2ff !important; box-shadow: 0 0 20px 5px rgba(0, 210, 255, 0.8) !important; transform: scale(1.05); }
+
+/* 手札の空き枠（使用後）の表現 */
+.empty-slot { background: rgba(0,0,0,0.1) !important; border: 1px dashed #555 !important; box-shadow: none !important; cursor: default !important; pointer-events: none; }
+.hidden-char.empty-slot, .hidden-action.empty-slot { opacity: 0; } /* 相手の空き枠は見えなくする */
+
+/* 相手の手札のバッジ（自分から見て下側に配置） */
+.opponent-badge { top: auto !important; bottom: -5px !important; }
+
+/* 盤面対象選択時のハイライト */
+.target-hl { z-index: 20000 !important; cursor: crosshair; box-shadow: 0 0 15px 5px #ffd700; border: 3px solid #ffd700; }

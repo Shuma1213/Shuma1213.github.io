@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>アリバト風 6×6オセロ</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+</head>
+<body>
+<div id="mode-select-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 30000; display: flex; justify-content: center; align-items: center;">
+    <div class="deck-select-modal">
+        <h2>プレイモードを選択</h2>
+        <button class="deck-btn" style="background: linear-gradient(to bottom, #2ecc71, #27ae60);" onclick="selectMode('offline')">💻 CPU対戦（オフライン）</button>
+        <button class="deck-btn" style="background: linear-gradient(to bottom, #9b59b6, #8e44ad);" onclick="selectMode('online')">🌐 プレイヤー対戦（オンライン）</button>
+    </div>
+</div>
+
+<div id="deck-select-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; justify-content: center; align-items: center;">
+    <div class="deck-select-modal">
+        <h2>自分のデッキを選択</h2>
+        <button class="deck-btn" onclick="selectDeck('287期受験生')">287期受験生デッキ</button>
+        <button class="deck-btn" onclick="selectDeck('幻影旅団')">幻影旅団デッキ</button>
+    </div>
+</div>
+
+<div id="room-select-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; justify-content: center; align-items: center;">
+    <div class="deck-select-modal">
+        <h2>オンライン対戦</h2>
+        <p style="font-size:12px; color:#aaa; margin-bottom:15px;">デッキ：<span id="selected-deck-name" style="color:#00d2ff;"></span></p>
+        <button class="deck-btn" onclick="createRoom()">部屋を作る</button>
+        <div style="margin: 20px 0; border-bottom: 1px solid #555;"></div>
+        <input type="text" id="room-id-input" placeholder="ルームIDを入力" style="width: 80%; padding: 10px; margin-bottom: 10px; text-align: center; font-size: 16px; border-radius: 5px; border: 1px solid #00d2ff; background: #111; color: #fff;">
+        <button class="deck-btn" style="background: linear-gradient(to bottom, #d80032, #6a0018);" onclick="joinRoom()">部屋に入る</button>
+    </div>
+</div>
+
+<div id="waiting-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; justify-content: center; align-items: center; flex-direction: column;">
+    <h2 style="color: #fff; text-shadow: 0 0 10px #00d2ff; margin-bottom: 10px;">ルームID: <span id="display-room-id" style="font-size: 32px; color: #00d2ff;"></span></h2>
+    <p style="color: #ccc;">対戦相手を待っています...</p>
+</div>
+
+<div id="app-container" style="display:none;">
+    <div id="mulligan-overlay">
+        <div id="mulligan-title">交換カード選択</div>
+        <div class="mulligan-grid">
+            <div id="mul-top" class="mul-pos"></div><div id="mul-left" class="mul-pos"></div>
+            <div id="mul-right" class="mul-pos"></div><div id="mul-bottom" class="mul-pos"></div>
+        </div>
+        <div class="gp-hex-wrapper" id="mulligan-ok-btn">
+            <div class="gp-hex-inner gp-btn-blue">OK</div>
+        </div>
+    </div>
+
+    <div id="hand-select-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10, 10, 20, 0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center;">
+        <div id="hand-select-title" style="font-size: 16px; margin-bottom: 20px; font-weight: bold; border-bottom: 1px solid #00d2ff; padding-bottom: 5px; letter-spacing: 2px;">対象のカードを選択してください</div>
+        <div id="hand-select-grid" style="display: flex; gap: 10px; margin-bottom: 30px; flex-wrap: wrap; justify-content: center; max-width: 90%;"></div>
+        <button id="hand-select-ok-btn" style="padding: 10px 50px; font-size: 16px; font-weight: bold; background: linear-gradient(to bottom, #00d2ff, #007bb5); border: 2px solid #fff; border-radius: 8px; color: white; cursor: pointer;">決定</button>
+    </div>
+
+    <div class="hud-container">
+        <div class="hud-icon-diamond"><div class="hud-icon-inner" style="color:#aaa;"></div></div>
+        <div class="hud-center">
+            <div class="hud-controls-row">
+                <div class="turn-badge" id="turn-badge-top"></div>
+                <div class="gp-hex-wrapper" id="gp-btn-top" onclick="toggleGPPool(opColor)"><div class="gp-hex-inner gp-btn-red">GP</div></div>
+                <div class="hud-diamonds" id="td-top">
+                    <div class="hud-diamond" id="td-top-1"></div><div class="hud-diamond" id="td-top-2"></div><div class="hud-diamond" id="td-top-3"></div>
+                </div>
+            </div>
+            <div class="hp-bar-wrapper">
+                <div class="hp-bar-fill purple-bar" id="hp-top-fill"></div>
+                <div class="hp-text">HP <span id="hp-top-val">120</span> /120</div>
+            </div>
+        </div>
+        <div class="hud-icon-diamond"><div class="hud-icon-inner">≡</div></div>
+    </div>
+    
+    <div class="hand-wrapper" style="height: 60px;">
+        <div id="hand-top" class="hand-container"></div>
+        <div class="gp-pool-panel top" id="gp-pool-top">
+            <div class="gp-list" id="gp-list-top"></div>
+            <div class="gp-pool-footer" id="gp-footer-top"></div>
+        </div>
+    </div>
+    
+    <div id="board-perspective-wrapper">
+        <div id="board-container">
+            <div id="board"></div>
+            <svg id="combo-svg" viewBox="0 0 312 312">
+                <defs>
+                    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                </defs>
+                <g id="combo-lines-group"></g>
+            </svg>
+        </div>
+    </div>
+
+    <div id="log-display"></div>
+
+    <div id="time-container">
+        <div id="timer-label">TIME</div>
+        <div id="timer-box">30</div>
+    </div>
+
+    <div class="hand-wrapper">
+        <div id="hand-bottom" class="hand-container"></div>
+        <div class="gp-pool-panel bottom" id="gp-pool-bottom">
+            <div class="gp-list" id="gp-list-bottom"></div>
+            <div class="gp-pool-footer" id="gp-footer-bottom"></div>
+        </div>
+    </div>
+
+    <div class="hud-container" style="margin-bottom: 10px;">
+        <div class="hud-icon-diamond" id="think-btn" onclick="useTimeExtension()">
+            <div class="hud-icon-inner">⏱</div>
+        </div>
+        <div class="hud-center">
+            <div class="hp-bar-wrapper" style="margin-bottom: 2px;">
+                <div class="hp-bar-fill" id="hp-bottom-fill"></div>
+                <div class="hp-text">HP <span id="hp-bottom-val">120</span> /120</div>
+            </div>
+            <div class="hud-controls-row">
+                <div class="hud-diamonds" id="td-bottom">
+                    <div class="hud-diamond" id="td-bottom-1"></div><div class="hud-diamond" id="td-bottom-2"></div><div class="hud-diamond" id="td-bottom-3"></div>
+                </div>
+                <div class="gp-hex-wrapper" id="gp-btn-bottom" onclick="toggleGPPool(myColor)"><div class="gp-hex-inner gp-btn-blue">GP</div></div>
+                <div class="turn-badge" id="turn-badge-bottom"></div>
+            </div>
+        </div>
+        <div class="hud-icon-diamond"><div class="hud-icon-inner">💬</div></div>
+    </div>
+</div>
+
+<script src="card.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
