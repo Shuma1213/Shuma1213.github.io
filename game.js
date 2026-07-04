@@ -1,13 +1,12 @@
 // ====== Firebase 初期化設定 ======
-// ※ここに取得したご自身のキーを上書きしてください
 const firebaseConfig = {
-  apiKey: "AIzaSyDd2LuXOjqcd30qNM3YZ-5kRxxWFhKvJ_k",
-  authDomain: "aribato-134a7.firebaseapp.com",
-  databaseURL: "https://aribato-134a7-default-rtdb.firebaseio.com",
-  projectId: "aribato-134a7",
-  storageBucket: "aribato-134a7.firebasestorage.app",
-  messagingSenderId: "573955770812",
-  appId: "1:573955770812:web:db120eddd5accc0f2803b9"
+    apiKey: "AIzaSyDd2LuXOjqcd30qNM3YZ-5kRxxWFhKvJ_k",
+    authDomain: "aribato-134a7.firebaseapp.com",
+    databaseURL: "https://aribato-134a7-default-rtdb.firebaseio.com",
+    projectId: "aribato-134a7",
+    storageBucket: "aribato-134a7.firebasestorage.app",
+    messagingSenderId: "573955770812",
+    appId: "1:573955770812:web:db120eddd5accc0f2803b9"
 };
 
 if (!firebase.apps.length) {
@@ -120,14 +119,11 @@ window.createRoom = function() {
     document.getElementById('waiting-overlay').style.display = 'flex';
     document.getElementById('display-room-id').textContent = currentRoomId;
 
-    // ホスト側の監視：相手が入ってきたら確実にデッキを生成する
     db.ref('rooms/' + currentRoomId).on('value', (snapshot) => {
         const data = snapshot.val();
         if (!data) return;
         
-        // 相手が入ってきた（guestDeckChoiceが追加された）
         if (data.status === 'playing' && data.guestDeckChoice && !data.decksGenerated) {
-            console.log("相手の入室を検知。デッキを生成します。");
             const hostDeckData = buildFixedDeck(myDeckChoice);
             const guestDeckData = buildFixedDeck(data.guestDeckChoice);
             db.ref('rooms/' + currentRoomId).update({
@@ -135,7 +131,6 @@ window.createRoom = function() {
                 decks: { host: hostDeckData, guest: guestDeckData }
             });
         }
-        // デッキが生成されたのを確認してゲーム画面へ
         if (data.decksGenerated) {
             db.ref('rooms/' + currentRoomId).off('value');
             document.getElementById('waiting-overlay').style.display = 'none';
@@ -156,18 +151,15 @@ window.joinRoom = async function() {
         if (roomData && roomData.status === 'waiting') {
             currentRoomId = inputId;
             isHost = false;
-            // 部屋の状態を playing に更新し、ホストに通知
             await roomRef.update({ status: 'playing', guestDeckChoice: myDeckChoice });
             
             document.getElementById('room-select-overlay').style.display = 'none';
             document.getElementById('waiting-overlay').style.display = 'flex';
             document.getElementById('display-room-id').textContent = "デッキ同期中...";
 
-            // ゲスト側の監視：ホストがデッキを生成し終わるのを待つ
             roomRef.on('value', (snap) => {
                 const data = snap.val();
                 if (data && data.decksGenerated) {
-                    console.log("デッキの同期が完了しました。");
                     roomRef.off('value');
                     document.getElementById('waiting-overlay').style.display = 'none';
                     startOnlineGame('purple', data.decks.guest, data.decks.host);
@@ -182,10 +174,12 @@ window.joinRoom = async function() {
 };
 
 window.startOfflineGame = function(selectedDeck) {
-    console.log("オフラインモード開始");
     document.getElementById('app-container').style.display = 'flex';
+    isOnlineMode = false; // ★ 確実にオフラインにする
+    
     const isYouFirst = Math.random() < 0.5;
     myColor = isYouFirst ? 'yellow' : 'purple';
+    opColor = isYouFirst ? 'purple' : 'yellow';
     
     const oppChoices = ['287期受験生', '幻影旅団'];
     const oppDeck = oppChoices[Math.floor(Math.random() * oppChoices.length)];
@@ -195,32 +189,33 @@ window.startOfflineGame = function(selectedDeck) {
         purple: myColor === 'purple' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck)
     };
     
-    initGameStateAndUI();
+    initGameStateAndUI(myColor); // ★ 自分の色を確実に渡す
     startMulliganPhase();
 };
 
 window.startOnlineGame = function(assignedColor, myDeckData, oppDeckData) {
-    console.log("オンラインモード開始: " + assignedColor);
     document.getElementById('app-container').style.display = 'flex';
+    isOnlineMode = true;
     myColor = assignedColor;
+    opColor = myColor === 'yellow' ? 'purple' : 'yellow';
+    
     masterDecks = {
         yellow: myColor === 'yellow' ? myDeckData : oppDeckData,
         purple: myColor === 'purple' ? myDeckData : oppDeckData
     };
 
-    initGameStateAndUI();
+    initGameStateAndUI(myColor); // ★ 自分の色を確実に渡す
     listenForOpponentMoves();
     startMulliganPhase();
 };
 
-function initGameStateAndUI() {
-    opColor = myColor === 'yellow' ? 'purple' : 'yellow';
+function initGameStateAndUI(col) {
     const botBadge = document.getElementById('turn-badge-bottom');
     const topBadge = document.getElementById('turn-badge-top');
-    botBadge.textContent = myColor === 'yellow' ? '先攻' : '後攻';
-    topBadge.textContent = myColor === 'yellow' ? '後攻' : '先攻';
-    botBadge.className = 'turn-badge ' + (myColor === 'yellow' ? 'badge-yellow' : 'badge-purple');
-    topBadge.className = 'turn-badge ' + (myColor === 'yellow' ? 'badge-purple' : 'badge-yellow');
+    botBadge.textContent = col === 'yellow' ? '先攻' : '後攻';
+    topBadge.textContent = col === 'yellow' ? '後攻' : '先攻';
+    botBadge.className = 'turn-badge ' + (col === 'yellow' ? 'badge-yellow' : 'badge-purple');
+    topBadge.className = 'turn-badge ' + (col === 'yellow' ? 'badge-purple' : 'badge-yellow');
 
     handYellow = [null, null, null, null]; 
     handPurple = [null, null, null, null];
@@ -229,7 +224,7 @@ function initGameStateAndUI() {
     hpYellow = 120; hpPurple = 120;
     
     playerGP = { yellow: { gp: {} }, purple: { gp: {} } };
-    playerGP[myColor === 'yellow' ? 'purple' : 'yellow'].gp['フリー'] = 1;
+    playerGP[col === 'yellow' ? 'purple' : 'yellow'].gp['フリー'] = 1;
     
     currentPlayer = 'yellow';
     boardData = new Array(36).fill(null);
@@ -253,6 +248,7 @@ function sendMoveToFirebase(moveType, dataPayload) {
 function listenForOpponentMoves() {
     db.ref('rooms/' + currentRoomId + '/moves').on('child_added', async (snapshot) => {
         const move = snapshot.val();
+        // 自分が送った通信は絶対に無視する（二重処理の防止）
         if (move.player === myColor) return;
         
         if (move.type === 'mulliganReady') {
@@ -280,7 +276,6 @@ function ensureCharacterInHand(player) {
     const hand = player === 'yellow' ? handYellow : handPurple;
     const deck = player === 'yellow' ? masterDecks.yellow : masterDecks.purple;
     
-    // アクションカードだけの無限ループ（手札枯渇）を防ぐため、山札にキャラがいるかチェック
     let nonNulls = hand.filter(c => c !== null);
     let loopCount = 0;
     while (nonNulls.length > 0 && nonNulls.every(c => c.type === 'action') && deck.some(c => c.type === 'character')) {
@@ -692,7 +687,6 @@ function updateBoardPerspective() {
     }
 }
 
-// 完全にオフライン対応させたマリガンフェーズ
 async function startMulliganPhase() {
     myMulliganReady = false;
     opMulliganReady = false;
@@ -723,20 +717,17 @@ async function startMulliganPhase() {
         shuffleDeck(myDeck);
         drawCards(myColor, 4);
         
-        // オフラインなら即座にゲーム開始
-        if (!isOnlineMode) {
-            console.log("オフライン：マリガン完了、ゲーム開始");
-            startTurn();
-            return;
-        }
-
-        myMulliganReady = true;
-        sendMoveToFirebase('mulliganReady', { ready: true });
-        if (!opMulliganReady) {
-            document.getElementById('waiting-overlay').style.display = 'flex';
-            document.getElementById('display-room-id').textContent = "相手の準備を待っています...";
+        if (isOnlineMode) {
+            myMulliganReady = true;
+            sendMoveToFirebase('mulliganReady', { ready: true });
+            if (!opMulliganReady) {
+                document.getElementById('waiting-overlay').style.display = 'flex';
+                document.getElementById('display-room-id').textContent = "相手の準備を待っています...";
+            } else {
+                document.getElementById('waiting-overlay').style.display = 'none';
+                startTurn();
+            }
         } else {
-            document.getElementById('waiting-overlay').style.display = 'none';
             startTurn();
         }
     };
