@@ -102,8 +102,14 @@ window.selectMode = function(mode) {
 window.selectDeck = function(deckName) {
     myDeckChoice = deckName;
     document.getElementById('deck-select-overlay').style.display = 'none';
-    startOfflineGame(deckName);
+    
+    if (isOnlineMode) {
+        startOnlineMatchmaking(deckName); // オンライン用の関数へ
+    } else {
+        startOfflineGame(deckName); // 既存のオフライン用の関数へ
+    }
 };
+
 
 // ====== オフライン用のゲーム開始処理 ======
 window.startOfflineGame = function(selectedDeck) {
@@ -1362,4 +1368,16 @@ window.toggleGPPool = function(playerCol) {
     
     document.getElementById(footerId).textContent = `残りデッキ ${deckLen}枚 / 捨て場 C:${dChar} A:${dAct}`;
     panel.style.display = 'flex';
+
+    window.selectDeck = function(deckName) {
+    myDeckChoice = deckName;
+    document.getElementById('deck-select-overlay').style.display = 'none';
+    
+    if (isOnlineMode) {
+        startOnlineMatchmaking(deckName); // オンライン用の関数へ
+    } else {
+        startOfflineGame(deckName); // 既存のオフライン用の関数へ
+    }
+};
+
 };
