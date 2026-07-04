@@ -319,11 +319,15 @@ function updateHPUI() {
 
 const directions = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
+// 安全にコストをチェックする関数（ハイライトバグ防止）
 function checkCostStatus(card, playerColor) {
-    const pGP = playerGP[playerColor].gp;
+    if (!card || !card.cost) return 'OK'; 
+    const pGP = playerGP[playerColor] ? playerGP[playerColor].gp : {};
     const availSpec = pGP[card.group] || 0;
     const totalGP = Object.values(pGP).reduce((sum, val) => sum + val, 0);
-    if (availSpec >= card.cost.specific && totalGP >= (card.cost.specific + card.cost.free)) return 'OK';
+    const specReq = card.cost.specific || 0;
+    const freeReq = card.cost.free || 0;
+    if (availSpec >= specReq && totalGP >= (specReq + freeReq)) return 'OK';
     return 'SHORTAGE';
 }
 
@@ -399,7 +403,6 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
     if (validCards.length === 0) return [];
     if (filterType !== 'debuff' && validCards.length <= count) return [...validCards];
 
-    // CPUやネットワーク相手の場合はUIを出さずランダム選択
     if (actingPlayer !== myColor) {
         if (filterType === 'debuff') return rawHand.filter(c => c && c.type === 'character').sort(() => 0.5 - Math.random()).slice(0, count);
         return validCards.sort(() => 0.5 - Math.random()).slice(0, count);
@@ -564,61 +567,66 @@ function createCardElementUI(card, index, playerColor, isHandCard = true) {
     }
 
     el.className = className; if (card.id) el.style.backgroundImage = `url('cards/${card.id}.png')`;
-    el.innerHTML = `<div class="${atkBadgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':displayAtk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div><div class="cost-container">${card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
+    el.innerHTML = `<div class="${atkBadgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':displayAtk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div><div class="cost-container">${card.cost && card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost && card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
     return el;
 }
 
+// ハイライトを安全に描画
 function updateHighlightsAndLines() {
-    document.querySelectorAll('.highlight-box:not(.target-hl)').forEach(el => el.remove());
-    svgGroup.innerHTML = ''; 
-    
-    if (window.selectedHandIndex == null || currentPlayer !== myColor) return;
-    
-    const hand = myColor === 'yellow' ? handYellow : handPurple;
-    const card = hand[window.selectedHandIndex];
-    if (!card || card.type !== 'character') return;
+    try {
+        document.querySelectorAll('.highlight-box:not(.target-hl)').forEach(el => el.remove());
+        svgGroup.innerHTML = ''; 
+        
+        if (window.selectedHandIndex == null || currentPlayer !== myColor) return;
+        
+        const hand = myColor === 'yellow' ? handYellow : handPurple;
+        const card = hand[window.selectedHandIndex];
+        if (!card || card.type !== 'character') return;
 
-    const costStatus = checkCostStatus(card, myColor);
+        const costStatus = checkCostStatus(card, myColor);
 
-    for (let i = 0; i < 36; i++) {
-        if (boardData[i] !== null) continue;
-        const { flippable, triggers } = getFlippableAndTriggers(i, myColor);
-        if (flippable.length === 0) continue;
+        for (let i = 0; i < 36; i++) {
+            if (boardData[i] !== null) continue;
+            const { flippable, triggers } = getFlippableAndTriggers(i, myColor);
+            if (flippable.length === 0) continue;
 
-        const cell = boardElement.children[i];
-        const hl = document.createElement('div');
-        hl.className = 'highlight-box';
+            const cell = boardElement.children[i];
+            const hl = document.createElement('div');
+            hl.className = 'highlight-box';
 
-        if (costStatus === 'SHORTAGE') {
-            hl.classList.add('hl-gray');
-        } else {
-            const abilityMet = checkAbilityMet(card, i, flippable, myColor);
-            if (abilityMet) hl.classList.add('hl-yellow');
-            else hl.classList.add('hl-blue');
+            if (costStatus === 'SHORTAGE') {
+                hl.classList.add('hl-gray');
+            } else {
+                const abilityMet = checkAbilityMet(card, i, flippable, myColor);
+                if (abilityMet) hl.classList.add('hl-yellow');
+                else hl.classList.add('hl-blue');
 
-            if (triggers.length > 0) {
-                const cx = (i % 6) * 52 + 26;
-                const cy = Math.floor(i / 6) * 52 + 26;
-                triggers.forEach(tIdx => {
-                    const targetCard = boardData[tIdx];
-                    if (targetCard && targetCard.type === 'character' && targetCard.combo && targetCard.combo.text) {
-                        const tx = (tIdx % 6) * 52 + 26;
-                        const ty = Math.floor(tIdx / 6) * 52 + 26;
-                        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                        line.setAttribute("x1", cx);
-                        line.setAttribute("y1", cy);
-                        line.setAttribute("x2", tx);
-                        line.setAttribute("y2", ty);
-                        line.setAttribute("stroke", "#ffd700");
-                        line.setAttribute("stroke-width", "3");
-                        line.setAttribute("stroke-dasharray", "8, 4");
-                        line.setAttribute("filter", "url(#glow)");
-                        svgGroup.appendChild(line);
-                    }
-                });
+                if (triggers.length > 0) {
+                    const cx = (i % 6) * 52 + 26;
+                    const cy = Math.floor(i / 6) * 52 + 26;
+                    triggers.forEach(tIdx => {
+                        const targetCard = boardData[tIdx];
+                        if (targetCard && targetCard.type === 'character' && targetCard.combo && targetCard.combo.text) {
+                            const tx = (tIdx % 6) * 52 + 26;
+                            const ty = Math.floor(tIdx / 6) * 52 + 26;
+                            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                            line.setAttribute("x1", cx);
+                            line.setAttribute("y1", cy);
+                            line.setAttribute("x2", tx);
+                            line.setAttribute("y2", ty);
+                            line.setAttribute("stroke", "#ffd700");
+                            line.setAttribute("stroke-width", "3");
+                            line.setAttribute("stroke-dasharray", "8, 4");
+                            line.setAttribute("filter", "url(#glow)");
+                            svgGroup.appendChild(line);
+                        }
+                    });
+                }
             }
+            cell.appendChild(hl);
         }
-        cell.appendChild(hl);
+    } catch(e) {
+        console.error("Highlight Error:", e);
     }
 }
 
@@ -637,8 +645,9 @@ function renderHands() {
             return;
         }
         const el = createCardElementUI(card, i, myColor);
-        if (card.type === 'action' && currentPlayer === myColor && !actionUsedThisTurn) el.onclick = () => playActionCard(i);
-        else if (card.type === 'character') {
+        if (card.type === 'action' && currentPlayer === myColor && !actionUsedThisTurn) {
+            el.onclick = () => playActionCard(i);
+        } else if (card.type === 'character') {
             el.onclick = () => { 
                 if (currentPlayer === myColor && !window.isBoardSelecting && !window.isBoardTargeting) { 
                     window.selectedHandIndex = (window.selectedHandIndex === i) ? null : i; 
@@ -735,6 +744,7 @@ async function startMulliganPhase() {
 }
 
 async function animateHandCard(card, playerColor, animClass) {
+    if (!card) return;
     const hand = playerColor === 'yellow' ? handYellow : handPurple;
     const idx = hand.indexOf(card);
     if (idx > -1) {
@@ -748,6 +758,7 @@ async function animateHandCard(card, playerColor, animClass) {
 // CPU用の自動対象抽出
 function getCPUTargetData(card, handIndex, hand, oppHand) {
     let targetData = {};
+    if (!card) return targetData;
     const id = card.id;
     if (id === "0004" || id === "0010" || id === "A199") {
         const valid = hand.map((c, i) => c !== null && i !== handIndex ? i : -1).filter(i => i !== -1);
@@ -776,7 +787,7 @@ function getCPUTargetData(card, handIndex, hand, oppHand) {
         if (oppCharIndices.length > 0) targetData.targetBoardIdx = oppCharIndices[Math.floor(Math.random() * oppCharIndices.length)];
     }
     else if (id === "A087" || id === "A083") {
-        const chars = oppHand.map((c, i) => c && (id==="A087" ? c.type === 'character' : (c.cost.specific + c.cost.free) <= 3) ? i : -1).filter(i => i !== -1);
+        const chars = oppHand.map((c, i) => c && (id==="A087" ? c.type === 'character' : (c.cost && (c.cost.specific + c.cost.free) <= 3)) ? i : -1).filter(i => i !== -1);
         if (chars.length > 0) {
             if (id==="A087") targetData.debuffHandIdx = chars[Math.floor(Math.random() * chars.length)];
             else targetData.discardHandIdx = chars[Math.floor(Math.random() * chars.length)];
@@ -804,9 +815,10 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
 
     if (isHuman) {
         if (checkCostStatus(card, currentPlayer) !== 'OK') return;
-        window.isBoardSelecting = true;
     }
 
+    window.isBoardSelecting = true;
+    
     try {
         const id = card.id;
         let targetData = isFromNetwork || isCPU ? (incomingTargetData.targets || incomingTargetData) : {};
@@ -837,7 +849,7 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
                 const chars = oppHand.map((c, i) => c && c.type === 'character' ? i : -1).filter(i => i !== -1);
                 if (chars.length > 0) targetData.debuffHandIdx = chars[Math.floor(Math.random() * chars.length)];
             } else if (id === "A083") {
-                const valid = oppHand.map((c, i) => c && (c.cost.specific + c.cost.free) <= 3 ? i : -1).filter(i => i !== -1);
+                const valid = oppHand.map((c, i) => c && (c.cost && (c.cost.specific + c.cost.free) <= 3) ? i : -1).filter(i => i !== -1);
                 if (valid.length > 0) targetData.discardHandIdx = valid[Math.floor(Math.random() * valid.length)];
             } else if (id === "A200") {
                 const nonNulls = hand.map((c, i) => c !== null && i !== index ? i : -1).filter(i => i !== -1);
@@ -848,8 +860,10 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
             }
 
             if (isOnlineMode) {
-                const cleanData = JSON.parse(JSON.stringify({ handIndex: index, cardData: card, targets: targetData }));
-                sendMoveToFirebase('playAction', cleanData);
+                try {
+                    const cleanData = JSON.parse(JSON.stringify({ handIndex: index, cardData: card, targets: targetData }));
+                    sendMoveToFirebase('playAction', cleanData);
+                } catch(e) {}
             }
         }
 
@@ -900,9 +914,11 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
             if(targetData.discardHandIdx !== undefined) {
                 if ((isFromNetwork || isCPU) && targetData.discardCardData) hand[targetData.discardHandIdx] = targetData.discardCardData;
                 const target = hand[targetData.discardHandIdx];
-                await animateHandCard(target, currentPlayer, 'card-discard-anim');
-                hand[targetData.discardHandIdx] = null;
-                if (currentPlayer === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+                if (target) {
+                    await animateHandCard(target, currentPlayer, 'card-discard-anim');
+                    hand[targetData.discardHandIdx] = null;
+                    if (currentPlayer === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+                }
             }
         }
         else if (id === "A158") {
@@ -911,7 +927,7 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
         else if (id === "A087") {
             await animateGPFly(14, currentPlayer, '幻影旅団');
             playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
-            if(targetData.debuffHandIdx !== undefined) {
+            if(targetData.debuffHandIdx !== undefined && oppHand[targetData.debuffHandIdx]) {
                 const target = oppHand[targetData.debuffHandIdx];
                 target.atk = Math.max(0, target.atk - 4);
                 logDisplay.textContent = `相手の手札のATKを-4!`;
@@ -950,7 +966,7 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
             }
         }
         else if (id === "A083") {
-            if(targetData.discardHandIdx !== undefined) {
+            if(targetData.discardHandIdx !== undefined && oppHand[targetData.discardHandIdx]) {
                 const target = oppHand[targetData.discardHandIdx];
                 await animateHandCard(target, opponentColor, 'card-discard-anim');
                 oppHand[targetData.discardHandIdx] = null;
@@ -963,7 +979,7 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
         }
         else if (id === "A163") {
             const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-            const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) >= 3);
+            const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost && (c.cost.specific + c.cost.free) >= 3));
             if (targetIdx !== -1) {
                 const drawn = deck.splice(targetIdx, 1)[0];
                 const emptyIdx = hand.indexOf(null);
@@ -976,7 +992,7 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
             await sleep(1000);
         }
         else if (id === "A200") {
-            if(targetData.returnHandIdx !== undefined) {
+            if(targetData.returnHandIdx !== undefined && hand[targetData.returnHandIdx]) {
                 const target = hand[targetData.returnHandIdx];
                 await animateHandCard(target, currentPlayer, 'card-return-anim');
                 hand[targetData.returnHandIdx] = null;
@@ -990,16 +1006,15 @@ async function playActionCard(index, isFromNetwork = false, incomingTargetData =
         }
         
         updateHPUI(); renderHands(); updateHighlightsAndLines();
-        if (hpYellow <= 0 || hpPurple <= 0) { checkGameOverAndChangeTurn(); return; }
-
+        
     } catch (e) {
         console.error("Action Card Error:", e);
     } finally {
-        if (isHuman) window.isBoardSelecting = false;
+        window.isBoardSelecting = false;
     }
 }
 
-// 完全に安全化された配置処理
+// ====== カード配置処理（ダブルチェック防止の完全対応版） ======
 async function placeStone(index, isFromNetwork = false, incomingData = {}, isCPU = false) {
     const isHuman = !isFromNetwork && !isCPU;
 
@@ -1007,9 +1022,10 @@ async function placeStone(index, isFromNetwork = false, incomingData = {}, isCPU
         if (currentPlayer !== myColor) return; 
         if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
         if (getFlippableAndTriggers(index, currentPlayer).flippable.length === 0) return;
-        window.isBoardSelecting = true;
     }
     
+    window.isBoardSelecting = true;
+
     try {
         const handIndex = isHuman ? window.selectedHandIndex : incomingData.handIndex;
         const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
@@ -1058,8 +1074,10 @@ async function placeStone(index, isFromNetwork = false, incomingData = {}, isCPU
             }
             
             if (isOnlineMode) {
-                const cleanData = JSON.parse(JSON.stringify({ index: index, handIndex: handIndex, cardData: selectedCard, targets: targetData }));
-                sendMoveToFirebase('placeStone', cleanData);
+                try {
+                    const cleanData = JSON.parse(JSON.stringify({ index: index, handIndex: handIndex, cardData: selectedCard, targets: targetData }));
+                    sendMoveToFirebase('placeStone', cleanData);
+                } catch(e) {}
             }
         }
 
@@ -1075,214 +1093,220 @@ async function placeStone(index, isFromNetwork = false, incomingData = {}, isCPU
     } catch (e) {
         console.error("PlaceStone Error:", e);
     } finally {
-        if (isHuman) window.isBoardSelecting = false;
+        window.isBoardSelecting = false;
+        // バトルと配置が確実に終わった後に、ターンを「1回だけ」回す
         checkGameOverAndChangeTurn();
     }
 }
 
 async function executeCombat(index, playerColor, selectedCard, targetData = {}) {
-    const result = getFlippableAndTriggers(index, playerColor);
-    const costStatus = checkCostStatus(selectedCard, playerColor);
-    const opponentColor = playerColor === 'yellow' ? 'purple' : 'yellow';
-    let triggerMet = checkAbilityMet(selectedCard, index, result.flippable, playerColor);
-    
-    let finalCard = { ...selectedCard, color: playerColor };
-    
-    if (costStatus !== 'OK' || !triggerMet) {
-        finalCard.combo = null; finalCard.ability = null; result.triggers = [];
-        let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
-        let buffAmount = selectedCard.atk - orig;
-        if (isNaN(buffAmount)) buffAmount = 0;
-        finalCard.atk = Math.max(0, 1 + buffAmount); 
-    }
-    
-    boardData[index] = finalCard;
-    renderBoard();
-    await sleep(500); 
-
-    result.flippable.forEach(idx => {
-        const tc = boardData[idx];
-        if (tc && tc.type === 'character') { 
-            if (tc.color === 'yellow') discardYellow.push(tc); 
-            else discardPurple.push(tc); 
-        }
-        boardData[idx] = { color: playerColor, type: 'stone', name: '' };
-    });
-    renderBoard();
-    await sleep(400);
-    
-    const targetPlayer = playerColor === 'yellow' ? 'purple' : 'yellow';
-
-    let baseAtk = finalCard.atk;
-    let flipBonus = result.flippable.length >= 2 ? (result.flippable.length * 2 - 3) : 0;
-    
-    const popup = document.createElement('div');
-    popup.className = 'damage-popup normal';
-    document.getElementById('app-container').appendChild(popup);
-    await sleep(50); popup.textContent = baseAtk; popup.classList.add('show'); await sleep(600);
-
-    let totalNormalDamage = baseAtk;
-    if (flipBonus > 0) {
-        popup.textContent = `${baseAtk} + ${flipBonus}`;
-        await sleep(600);
-        totalNormalDamage = baseAtk + flipBonus;
-        popup.textContent = totalNormalDamage;
-        await sleep(500);
-    }
-
-    let { finalDamage: nFinalDmg, reduction: nRed } = applyDamageReduction(totalNormalDamage, 'normal', targetPlayer);
-    if (nRed > 0) {
-        popup.textContent = `-${nRed}`;
-        popup.className = 'damage-popup reduce show';
-        await sleep(800);
-        popup.textContent = nFinalDmg; 
-        await sleep(600);
-    }
-    
-    popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
-    await sleep(300); 
-    
-    if (playerColor === 'yellow') hpPurple -= nFinalDmg; else hpYellow -= nFinalDmg;
-    updateHPUI();
-    popup.remove();
-    await sleep(200);
-
-    if (hpYellow <= 0 || hpPurple <= 0) return;
-
-    let abilityDamage = 0;
-    if (finalCard.ability && finalCard.ability.text && triggerMet) {
-        const text = finalCard.ability.text;
-        const sMatch = text.match(/特殊ダメージを(\d+)/);
-        const nMatch = text.match(/念ダメージを(\d+)/);
-        if (sMatch) abilityDamage += parseInt(sMatch[1]);
-        if (nMatch) abilityDamage += parseInt(nMatch[1]);
-
-        if (finalCard.id === "0003") activeEffects.push({ player: playerColor, type: 'buff_random', amount: 2, turnsLeft: 3 });
-        if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
+    try {
+        const result = getFlippableAndTriggers(index, playerColor);
+        const costStatus = checkCostStatus(selectedCard, playerColor);
+        const opponentColor = playerColor === 'yellow' ? 'purple' : 'yellow';
+        let triggerMet = checkAbilityMet(selectedCard, index, result.flippable, playerColor);
         
-        const hMatch = text.match(/HPを(\d+)回復/);
-        if (hMatch && result.flippable.length >= 2) {
-            const heal = parseInt(hMatch[1]);
-            logDisplay.textContent = `⚡能力発動！`;
-            await showDamageAnimation(`回復 ${heal}`, playerColor, 'heal');
-            if (playerColor === 'yellow') hpYellow += heal; else hpPurple += heal;
-            updateHPUI();
+        let finalCard = { ...selectedCard, color: playerColor };
+        
+        if (costStatus !== 'OK' || !triggerMet) {
+            finalCard.combo = null; finalCard.ability = null; result.triggers = [];
+            let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
+            let buffAmount = selectedCard.atk - orig;
+            if (isNaN(buffAmount)) buffAmount = 0;
+            finalCard.atk = Math.max(0, 1 + buffAmount); 
+        }
+        
+        boardData[index] = finalCard;
+        renderBoard();
+        await sleep(500); 
+
+        result.flippable.forEach(idx => {
+            const tc = boardData[idx];
+            if (tc && tc.type === 'character') { 
+                if (tc.color === 'yellow') discardYellow.push(tc); 
+                else discardPurple.push(tc); 
+            }
+            boardData[idx] = { color: playerColor, type: 'stone', name: '' };
+        });
+        renderBoard();
+        await sleep(400);
+        
+        const targetPlayer = playerColor === 'yellow' ? 'purple' : 'yellow';
+
+        let baseAtk = finalCard.atk;
+        let flipBonus = result.flippable.length >= 2 ? (result.flippable.length * 2 - 3) : 0;
+        
+        const popup = document.createElement('div');
+        popup.className = 'damage-popup normal';
+        document.getElementById('app-container').appendChild(popup);
+        await sleep(50); popup.textContent = baseAtk; popup.classList.add('show'); await sleep(600);
+
+        let totalNormalDamage = baseAtk;
+        if (flipBonus > 0) {
+            popup.textContent = `${baseAtk} + ${flipBonus}`;
+            await sleep(600);
+            totalNormalDamage = baseAtk + flipBonus;
+            popup.textContent = totalNormalDamage;
+            await sleep(500);
         }
 
-        if (finalCard.id === "0064") {
-            const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
-            oppHand.filter(c => c && c.type === 'character').forEach(c => { c.atk = Math.max(0, c.atk - 3); });
-            logDisplay.textContent = `⚡相手の手札をデバフ！`;
-            renderHands();
+        let { finalDamage: nFinalDmg, reduction: nRed } = applyDamageReduction(totalNormalDamage, 'normal', targetPlayer);
+        if (nRed > 0) {
+            popup.textContent = `-${nRed}`;
+            popup.className = 'damage-popup reduce show';
+            await sleep(800);
+            popup.textContent = nFinalDmg; 
+            await sleep(600);
         }
-
-        if (finalCard.id === "0066") {
-            activeEffects.push({ player: playerColor, type: 'reduce_damage_all', amount: 2, turnsLeft: 3, index: index, cardId: finalCard.id });
-        }
-        if (finalCard.id === "0060") {
-            activeEffects.push({ player: playerColor, type: 'reduce_damage_normal', amount: 4, turnsLeft: 4, index: index, cardId: finalCard.id });
-        }
-    }
-    
-    if (abilityDamage > 0) {
-        logDisplay.textContent = `⚡能力発動！`;
-        let { finalDamage: aFinalDmg, reduction: aRed } = applyDamageReduction(abilityDamage, 'special', targetPlayer);
-        if (aRed > 0) {
-            await showDamageAnimationReduction(aRed, aFinalDmg, targetPlayer);
-        } else {
-            await showDamageAnimation(`能力 ${aFinalDmg}`, targetPlayer);
-        }
-        if (playerColor === 'yellow') hpPurple -= aFinalDmg; else hpYellow -= aFinalDmg;
+        
+        popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
+        await sleep(300); 
+        
+        if (playerColor === 'yellow') hpPurple -= nFinalDmg; else hpYellow -= nFinalDmg;
         updateHPUI();
+        popup.remove();
         await sleep(200);
-        if (hpYellow <= 0 || hpPurple <= 0) return; 
-    }
 
-    for (let tIdx of result.triggers) {
-        const bCard = boardData[tIdx];
-        if (bCard && bCard.type === 'character' && bCard.combo && bCard.combo.text) {
-            let comboDmg = 0; let comboHeal = 0;
-            const sMatch = bCard.combo.text.match(/特殊ダメージを(\d+)/);
-            const nMatch = bCard.combo.text.match(/念ダメージを(\d+)/);
-            const hMatch = bCard.combo.text.match(/HPを(\d+)回復/);
+        if (hpYellow <= 0 || hpPurple <= 0) return;
+
+        let abilityDamage = 0;
+        if (finalCard.ability && finalCard.ability.text && triggerMet) {
+            const text = finalCard.ability.text;
+            const sMatch = text.match(/特殊ダメージを(\d+)/);
+            const nMatch = text.match(/念ダメージを(\d+)/);
+            if (sMatch) abilityDamage += parseInt(sMatch[1]);
+            if (nMatch) abilityDamage += parseInt(nMatch[1]);
+
+            if (finalCard.id === "0003") activeEffects.push({ player: playerColor, type: 'buff_random', amount: 2, turnsLeft: 3 });
+            if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
             
-            if (sMatch) comboDmg += parseInt(sMatch[1]);
-            if (nMatch) comboDmg += parseInt(nMatch[1]);
-            if (hMatch) comboHeal += parseInt(hMatch[1]);
-
-            if (comboDmg > 0) {
-                logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
-                let { finalDamage: cFinalDmg, reduction: cRed } = applyDamageReduction(comboDmg, 'special', targetPlayer);
-                if (cRed > 0) {
-                    await showDamageAnimationReduction(cRed, cFinalDmg, targetPlayer);
-                } else {
-                    await showDamageAnimation(`コンボ ${cFinalDmg}`, targetPlayer);
-                }
-                if (playerColor === 'yellow') hpPurple -= cFinalDmg; else hpYellow -= cFinalDmg;
+            const hMatch = text.match(/HPを(\d+)回復/);
+            if (hMatch && result.flippable.length >= 2) {
+                const heal = parseInt(hMatch[1]);
+                logDisplay.textContent = `⚡能力発動！`;
+                await showDamageAnimation(`回復 ${heal}`, playerColor, 'heal');
+                if (playerColor === 'yellow') hpYellow += heal; else hpPurple += heal;
                 updateHPUI();
-                await sleep(300);
-                if (hpYellow <= 0 || hpPurple <= 0) return; 
             }
-            if (comboHeal > 0) {
-                logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
-                await showDamageAnimation(`回復 ${comboHeal}`, playerColor, 'heal');
-                if (playerColor === 'yellow') hpYellow += comboHeal; else hpPurple += comboHeal;
-                updateHPUI();
-                await sleep(300);
+
+            if (finalCard.id === "0064") {
+                const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
+                oppHand.filter(c => c && c.type === 'character').forEach(c => { c.atk = Math.max(0, c.atk - 3); });
+                logDisplay.textContent = `⚡相手の手札をデバフ！`;
+                renderHands();
+            }
+
+            if (finalCard.id === "0066") {
+                activeEffects.push({ player: playerColor, type: 'reduce_damage_all', amount: 2, turnsLeft: 3, index: index, cardId: finalCard.id });
+            }
+            if (finalCard.id === "0060") {
+                activeEffects.push({ player: playerColor, type: 'reduce_damage_normal', amount: 4, turnsLeft: 4, index: index, cardId: finalCard.id });
             }
         }
-    }
+        
+        if (abilityDamage > 0) {
+            logDisplay.textContent = `⚡能力発動！`;
+            let { finalDamage: aFinalDmg, reduction: aRed } = applyDamageReduction(abilityDamage, 'special', targetPlayer);
+            if (aRed > 0) {
+                await showDamageAnimationReduction(aRed, aFinalDmg, targetPlayer);
+            } else {
+                await showDamageAnimation(`能力 ${aFinalDmg}`, targetPlayer);
+            }
+            if (playerColor === 'yellow') hpPurple -= aFinalDmg; else hpYellow -= aFinalDmg;
+            updateHPUI();
+            await sleep(200);
+            if (hpYellow <= 0 || hpPurple <= 0) return; 
+        }
 
-    const activeHand = playerColor === 'yellow' ? handYellow : handPurple;
-    
-    if (targetData.discardHandIdx !== undefined) {
-        if (targetData.discardCardData) activeHand[targetData.discardHandIdx] = targetData.discardCardData;
-        const c = activeHand[targetData.discardHandIdx];
-        await animateHandCard(c, playerColor, 'card-discard-anim');
-        activeHand[targetData.discardHandIdx] = null;
-        if (playerColor === 'yellow') discardYellow.push(c); else discardPurple.push(c);
-    }
-    if (targetData.returnHandIdx !== undefined) {
-        const c = activeHand[targetData.returnHandIdx];
-        await animateHandCard(c, playerColor, 'card-return-anim');
-        activeHand[targetData.returnHandIdx] = null;
-        const deck = playerColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.push(c); shuffleDeck(deck);
-    }
-    if (targetData.debuffHandIdx !== undefined) {
-        const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
-        oppHand[targetData.debuffHandIdx].atk = Math.max(0, oppHand[targetData.debuffHandIdx].atk - 10);
-    }
-    if (targetData.buffHandIdx !== undefined) {
-        if (finalCard.id === "0002") activeHand[targetData.buffHandIdx].atk += 3;
-        if (finalCard.id === "0031") activeHand[targetData.buffHandIdx].atk += 5;
-    }
-    if (targetData.buffHandIndices) {
-        targetData.buffHandIndices.forEach(i => activeHand[i].atk += 5);
-    }
+        for (let tIdx of result.triggers) {
+            const bCard = boardData[tIdx];
+            if (bCard && bCard.type === 'character' && bCard.combo && bCard.combo.text) {
+                let comboDmg = 0; let comboHeal = 0;
+                const sMatch = bCard.combo.text.match(/特殊ダメージを(\d+)/);
+                const nMatch = bCard.combo.text.match(/念ダメージを(\d+)/);
+                const hMatch = bCard.combo.text.match(/HPを(\d+)回復/);
+                
+                if (sMatch) comboDmg += parseInt(sMatch[1]);
+                if (nMatch) comboDmg += parseInt(nMatch[1]);
+                if (hMatch) comboHeal += parseInt(hMatch[1]);
 
-    if (Object.keys(targetData).length > 0) {
+                if (comboDmg > 0) {
+                    logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
+                    let { finalDamage: cFinalDmg, reduction: cRed } = applyDamageReduction(comboDmg, 'special', targetPlayer);
+                    if (cRed > 0) {
+                        await showDamageAnimationReduction(cRed, cFinalDmg, targetPlayer);
+                    } else {
+                        await showDamageAnimation(`コンボ ${cFinalDmg}`, targetPlayer);
+                    }
+                    if (playerColor === 'yellow') hpPurple -= cFinalDmg; else hpYellow -= cFinalDmg;
+                    updateHPUI();
+                    await sleep(300);
+                    if (hpYellow <= 0 || hpPurple <= 0) return; 
+                }
+                if (comboHeal > 0) {
+                    logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
+                    await showDamageAnimation(`回復 ${comboHeal}`, playerColor, 'heal');
+                    if (playerColor === 'yellow') hpYellow += comboHeal; else hpPurple += comboHeal;
+                    updateHPUI();
+                    await sleep(300);
+                }
+            }
+        }
+
+        const activeHand = playerColor === 'yellow' ? handYellow : handPurple;
+        
+        if (targetData.discardHandIdx !== undefined && activeHand[targetData.discardHandIdx]) {
+            if (targetData.discardCardData) activeHand[targetData.discardHandIdx] = targetData.discardCardData;
+            const c = activeHand[targetData.discardHandIdx];
+            await animateHandCard(c, playerColor, 'card-discard-anim');
+            activeHand[targetData.discardHandIdx] = null;
+            if (playerColor === 'yellow') discardYellow.push(c); else discardPurple.push(c);
+        }
+        if (targetData.returnHandIdx !== undefined && activeHand[targetData.returnHandIdx]) {
+            const c = activeHand[targetData.returnHandIdx];
+            await animateHandCard(c, playerColor, 'card-return-anim');
+            activeHand[targetData.returnHandIdx] = null;
+            const deck = playerColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            deck.push(c); shuffleDeck(deck);
+        }
+        if (targetData.debuffHandIdx !== undefined) {
+            const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
+            if(oppHand[targetData.debuffHandIdx]) oppHand[targetData.debuffHandIdx].atk = Math.max(0, oppHand[targetData.debuffHandIdx].atk - 10);
+        }
+        if (targetData.buffHandIdx !== undefined && activeHand[targetData.buffHandIdx]) {
+            if (finalCard.id === "0002") activeHand[targetData.buffHandIdx].atk += 3;
+            if (finalCard.id === "0031") activeHand[targetData.buffHandIdx].atk += 5;
+        }
+        if (targetData.buffHandIndices) {
+            targetData.buffHandIndices.forEach(i => { if(activeHand[i]) activeHand[i].atk += 5; });
+        }
+
+        if (Object.keys(targetData).length > 0) {
+            renderHands();
+            await sleep(300);
+        }
+
+        await animateGPFly(index, playerColor, finalCard.group);
+        playerGP[playerColor].gp[finalCard.group] = (playerGP[playerColor].gp[finalCard.group] || 0) + 1;
+        
+        if (triggerMet && finalCard.id === "0073") {
+            await animateGPFly(index, playerColor, '幻影旅団');
+            playerGP[playerColor].gp['幻影旅団'] = (playerGP[playerColor].gp['幻影旅団'] || 0) + 1;
+        }
+
+        logDisplay.textContent = ``;
         renderHands();
-        await sleep(300);
+    } catch (e) {
+        console.error("戦闘処理エラー:", e);
     }
-
-    await animateGPFly(index, playerColor, finalCard.group);
-    playerGP[playerColor].gp[finalCard.group] = (playerGP[playerColor].gp[finalCard.group] || 0) + 1;
-    
-    if (triggerMet && finalCard.id === "0073") {
-        await animateGPFly(index, playerColor, '幻影旅団');
-        playerGP[playerColor].gp['幻影旅団'] = (playerGP[playerColor].gp['幻影旅団'] || 0) + 1;
-    }
-
-    logDisplay.textContent = ``;
-    renderHands();
 }
 
 function checkGameOverAndChangeTurn() {
     window.selectedHandIndex = null; 
     clearInterval(timerId); 
     if (hpYellow <= 0 || hpPurple <= 0 || !boardData.includes(null)) { setTimeout(() => alert(`ゲーム終了！`), 100); return; }
-    currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow'; startTurn();
+    currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow'; 
+    startTurn();
 }
 
 function startTurn() {
@@ -1341,6 +1365,7 @@ function startTurn() {
 
 async function autoPlayTimeout() {
     logDisplay.textContent = "時間切れ！自動で配置します。";
+    window.isBoardSelecting = true;
     try {
         const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
         const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
@@ -1363,6 +1388,7 @@ async function autoPlayTimeout() {
             }
         }
         logDisplay.textContent = "配置可能キャラなし！パスします。";
+        
         if (isOnlineMode) {
             try { sendMoveToFirebase('passTurn', {}); } catch(e){}
         }
