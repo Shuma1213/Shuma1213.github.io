@@ -95,45 +95,118 @@ window.selectMode = function(mode) {
     document.getElementById('deck-select-overlay').style.display = 'flex';
 };
 
+// ====== デッキ選択と画面遷移 ======
 window.selectDeck = function(deckName) {
     myDeckChoice = deckName;
     document.getElementById('deck-select-overlay').style.display = 'none';
     
     // オンラインとオフラインで処理を分岐
     if (isOnlineMode) {
-        startOnlineMatchmaking(deckName);
+        // オンラインの場合は「部屋選択画面」を表示
+        document.getElementById('selected-deck-name').textContent = deckName;
+        document.getElementById('room-select-overlay').style.display = 'flex';
     } else {
         startOfflineGame(deckName);
     }
 };
 
-// ====== オフライン用のゲーム開始処理 ======
-window.startOfflineGame = function(selectedDeck) {
-    document.getElementById('app-container').style.display = 'flex';
-    
-    const isYouFirst = Math.random() < 0.5;
-    myColor = isYouFirst ? 'yellow' : 'purple';
-    opColor = isYouFirst ? 'purple' : 'yellow';
+// ==========================================
+// オンライン対戦：ルーム管理機能
+// ==========================================
 
+// 部屋を作る（ホスト側）
+window.createRoom = function() {
+    document.getElementById('room-select-overlay').style.display = 'none';
+    
+    // 4桁のランダムなルームIDを生成
+    const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+    currentRoomId = roomId;
+    isHost = true;
+    myColor = 'yellow'; // ホストは先攻（黄色）
+    opColor = 'purple';
+
+    const roomRef = db.ref('rooms/' + roomId);
+    roomRef.set({
+        status: 'waiting',
+        player1Deck: myDeckChoice,
+        boardData: new Array(36).fill(null),
+        currentPlayer: 'yellow'
+    });
+
+    // 待機画面を表示
+    document.getElementById('display-room-id').textContent = roomId;
+    document.getElementById('waiting-overlay').style.display = 'flex';
+
+    // 相手が入室してくるのを監視
+    roomRef.on('value', (snap) => {
+        const data = snap.val();
+        // 相手が入室してステータスが 'playing' になったらゲーム開始
+        if (data && data.status === 'playing') {
+            roomRef.off('value'); // 待機用の監視を解除
+            document.getElementById('waiting-overlay').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+            logDisplay.textContent = "対戦相手が入室しました！";
+            
+            masterDecks = {
+                yellow: buildFixedDeck(myDeckChoice),
+                purple: buildFixedDeck(data.player2Deck)
+            };
+            initOnlineGame();
+        }
+    });
+};
+
+// 部屋に入る（ゲスト側）
+window.joinRoom = function() {
+    const roomId = document.getElementById('room-id-input').value.trim();
+    if (!roomId) {
+        alert("ルームIDを入力してください");
+        return;
+    }
+
+    const roomRef = db.ref('rooms/' + roomId);
+    roomRef.once('value', (snap) => {
+        const data = snap.val();
+        
+        // 部屋が存在し、かつ待機中であれば入室成功
+        if (data && data.status === 'waiting') {
+            document.getElementById('room-select-overlay').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+            
+            currentRoomId = roomId;
+            isHost = false;
+            myColor = 'purple'; // ゲストは後攻（紫）
+            opColor = 'yellow';
+            
+            // Firebaseのステータスを更新してホストに知らせる
+            roomRef.update({
+                status: 'playing',
+                player2Deck: myDeckChoice
+            });
+
+            masterDecks = {
+                yellow: buildFixedDeck(data.player1Deck),
+                purple: buildFixedDeck(myDeckChoice)
+            };
+            logDisplay.textContent = "部屋に入室しました！";
+            initOnlineGame();
+        } else {
+            alert("部屋が見つからないか、既に対戦中です。正しいIDか確認してください。");
+        }
+    });
+};
+
+// ====== オンラインゲームの初期化と同期設定 ======
+function initOnlineGame() {
     const botBadge = document.getElementById('turn-badge-bottom');
     const topBadge = document.getElementById('turn-badge-top');
-    botBadge.textContent = isYouFirst ? '先攻' : '後攻';
-    topBadge.textContent = isYouFirst ? '後攻' : '先攻';
-    botBadge.className = 'turn-badge ' + (isYouFirst ? 'badge-yellow' : 'badge-purple');
-    topBadge.className = 'turn-badge ' + (isYouFirst ? 'badge-purple' : 'badge-yellow');
-
-    const oppDeckChoices = ['287期受験生', '幻影旅団'];
-    const oppDeck = oppDeckChoices[Math.floor(Math.random() * oppDeckChoices.length)];
-
-    masterDecks = {
-        yellow: myColor === 'yellow' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck),
-        purple: myColor === 'purple' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck)
-    };
+    botBadge.textContent = isHost ? '先攻' : '後攻';
+    topBadge.textContent = isHost ? '後攻' : '先攻';
+    botBadge.className = 'turn-badge ' + (isHost ? 'badge-yellow' : 'badge-purple');
+    topBadge.className = 'turn-badge ' + (isHost ? 'badge-purple' : 'badge-yellow');
     
     playerGP = { yellow: { gp: {} }, purple: { gp: {} } };
-    
-    const secondPlayer = isYouFirst ? opColor : myColor;
-    playerGP[secondPlayer].gp['フリー'] = 1;
+    playerGP['purple'].gp['フリー'] = 1; // 後攻に1GP付与
     
     currentPlayer = 'yellow';
     
@@ -142,8 +215,37 @@ window.startOfflineGame = function(selectedDeck) {
     boardData[14] = { color: 'purple', type: 'stone', name: '' };
     boardData[21] = { color: 'purple', type: 'stone', name: '' };
 
-    startMulliganPhase();
+    const roomRef = db.ref('rooms/' + currentRoomId);
+    
+    // データ同期のリスナー（相手の行動を受け取る）
+    roomRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data || data.status === 'waiting') return;
+
+        if (data.boardData) boardData = data.boardData;
+        if (data.hpYellow !== undefined) hpYellow = data.hpYellow;
+        if (data.hpPurple !== undefined) hpPurple = data.hpPurple;
+        
+        updateHPUI();
+        renderBoard();
+        
+        // ターンが切り替わった場合の処理
+        if (data.currentPlayer && data.currentPlayer !== currentPlayer) {
+            currentPlayer = data.currentPlayer;
+            if (currentPlayer === myColor) {
+                startTurn(); // 自分のターン開始処理
+            } else {
+                logDisplay.textContent = "相手のターンです...";
+                renderHands();
+            }
+        }
+    });
+
+    startMulliganPhase(); 
 }
+
+// （※これより下は、既存の ensureCharacterInHand や drawCards などの関数がそのまま続きます）
+
 
 // ====== オンライン対戦用の関数群 ======
 window.startOnlineMatchmaking = function(selectedDeck) {
