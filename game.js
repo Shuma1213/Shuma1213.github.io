@@ -91,10 +91,6 @@ function shuffleDeck(deck) {
 // ====== モード選択 ======
 window.selectMode = function(mode) {
     isOnlineMode = (mode === 'online');
-    if(isOnlineMode) {
-        alert("オンライン対戦は現在調整中のため、オフライン対戦をお楽しみください。");
-        return;
-    }
     document.getElementById('mode-select-overlay').style.display = 'none';
     document.getElementById('deck-select-overlay').style.display = 'flex';
 };
@@ -103,13 +99,13 @@ window.selectDeck = function(deckName) {
     myDeckChoice = deckName;
     document.getElementById('deck-select-overlay').style.display = 'none';
     
+    // オンラインとオフラインで処理を分岐
     if (isOnlineMode) {
-        startOnlineMatchmaking(deckName); // オンライン用の関数へ
+        startOnlineMatchmaking(deckName);
     } else {
-        startOfflineGame(deckName); // 既存のオフライン用の関数へ
+        startOfflineGame(deckName);
     }
 };
-
 
 // ====== オフライン用のゲーム開始処理 ======
 window.startOfflineGame = function(selectedDeck) {
@@ -147,6 +143,122 @@ window.startOfflineGame = function(selectedDeck) {
     boardData[21] = { color: 'purple', type: 'stone', name: '' };
 
     startMulliganPhase();
+}
+
+// ====== オンライン対戦用の関数群 ======
+window.startOnlineMatchmaking = function(selectedDeck) {
+    document.getElementById('app-container').style.display = 'flex';
+    logDisplay.textContent = "対戦相手を探しています...";
+
+    const roomsRef = db.ref('rooms');
+    
+    // 待機中の部屋を探す
+    roomsRef.once('value', (snapshot) => {
+        let joined = false;
+        snapshot.forEach((child) => {
+            const roomData = child.val();
+            if (roomData.status === 'waiting') {
+                currentRoomId = child.key;
+                isHost = false;
+                myColor = 'purple';
+                opColor = 'yellow';
+                
+                // 部屋のステータスを対戦中に更新
+                db.ref('rooms/' + currentRoomId).update({
+                    status: 'playing',
+                    player2Deck: selectedDeck
+                });
+                joined = true;
+                
+                // 相手デッキの構築
+                masterDecks = {
+                    yellow: buildFixedDeck(roomData.player1Deck),
+                    purple: buildFixedDeck(selectedDeck)
+                };
+                
+                initOnlineGame();
+                return true;
+            }
+        });
+
+        // 部屋がなければ自分で作成
+        if (!joined) {
+            const newRoomRef = roomsRef.push();
+            currentRoomId = newRoomRef.key;
+            isHost = true;
+            myColor = 'yellow';
+            opColor = 'purple';
+
+            newRoomRef.set({
+                status: 'waiting',
+                player1Deck: selectedDeck,
+                boardData: new Array(36).fill(null),
+                currentPlayer: 'yellow'
+            });
+
+            // 相手が入ってくるのを待つ
+            newRoomRef.on('child_changed', (snap) => {
+                if (snap.key === 'status' && snap.val() === 'playing') {
+                    db.ref('rooms/' + currentRoomId).once('value', (fullSnap) => {
+                        const data = fullSnap.val();
+                        logDisplay.textContent = "対戦相手が見つかりました！";
+                        masterDecks = {
+                            yellow: buildFixedDeck(selectedDeck),
+                            purple: buildFixedDeck(data.player2Deck)
+                        };
+                        initOnlineGame();
+                    });
+                }
+            });
+        }
+    });
+};
+
+function initOnlineGame() {
+    const botBadge = document.getElementById('turn-badge-bottom');
+    const topBadge = document.getElementById('turn-badge-top');
+    botBadge.textContent = isHost ? '先攻' : '後攻';
+    topBadge.textContent = isHost ? '後攻' : '先攻';
+    botBadge.className = 'turn-badge ' + (isHost ? 'badge-yellow' : 'badge-purple');
+    topBadge.className = 'turn-badge ' + (isHost ? 'badge-purple' : 'badge-yellow');
+    
+    playerGP = { yellow: { gp: {} }, purple: { gp: {} } };
+    playerGP['purple'].gp['フリー'] = 1; // 後攻に1GP付与
+    
+    currentPlayer = 'yellow';
+    
+    boardData[15] = { color: 'yellow', type: 'stone', name: '' };
+    boardData[20] = { color: 'yellow', type: 'stone', name: '' };
+    boardData[14] = { color: 'purple', type: 'stone', name: '' };
+    boardData[21] = { color: 'purple', type: 'stone', name: '' };
+
+    const roomRef = db.ref('rooms/' + currentRoomId);
+    
+    // データ同期のリスナー
+    roomRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data || data.status === 'waiting') return;
+
+        if (data.boardData) boardData = data.boardData;
+        if (data.hpYellow !== undefined) hpYellow = data.hpYellow;
+        if (data.hpPurple !== undefined) hpPurple = data.hpPurple;
+        
+        updateHPUI();
+        renderBoard();
+        
+        // ターンが切り替わった場合の処理
+        if (data.currentPlayer && data.currentPlayer !== currentPlayer) {
+            currentPlayer = data.currentPlayer;
+            if (currentPlayer === myColor) {
+                startTurn(); // 自分のターン開始処理
+            } else {
+                logDisplay.textContent = "相手のターンです...";
+                renderHands();
+            }
+        }
+    });
+
+    startMulliganPhase(); 
 }
 
 function ensureCharacterInHand(player) {
@@ -195,12 +307,11 @@ function updateHPUI() {
 const directions = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
 function checkCostStatus(card, playerColor) {
-    if (!card) return 'SHORTAGE'; // ←【修正】安全対策
+    if (!card) return 'SHORTAGE';
     const pGP = playerGP[playerColor].gp;
     const availSpec = pGP[card.group] || 0;
     const totalGP = Object.values(pGP).reduce((sum, val) => sum + val, 0);
-    
-    const specificCost = card.cost?.specific || 0; // ←【修正】オプショナルチェーン
+    const specificCost = card.cost?.specific || 0;
     const freeCost = card.cost?.free || 0;
     
     if (availSpec >= specificCost && totalGP >= (specificCost + freeCost)) return 'OK';
@@ -449,7 +560,7 @@ function createCardElementUI(card, index, playerColor, isHandCard = true) {
 
 function updateHighlightsAndLines() {
     document.querySelectorAll('.highlight-box:not(.target-hl)').forEach(el => el.remove());
-    if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+    if (svgGroup) svgGroup.innerHTML = '';
     
     if (window.selectedHandIndex == null || currentPlayer !== myColor) return;
     
@@ -593,6 +704,8 @@ async function startMulliganPhase() {
         myDeck.push(...returnedMy); 
         shuffleDeck(myDeck);
         drawCards(myColor, 4);
+        
+        // 準備が完了したらターン開始
         startTurn();
     };
 }
@@ -608,7 +721,7 @@ async function animateHandCard(card, playerColor, animClass) {
     await sleep(500);
 }
 
-// 完全にオリジナルの playActionCard
+// アクションカードのプレイ処理
 async function playActionCard(index) {
     if (actionUsedThisTurn || window.isBoardSelecting || window.isBoardTargeting) return;
     
@@ -790,6 +903,15 @@ async function playActionCard(index) {
     
     if (hpYellow <= 0 || hpPurple <= 0) { checkGameOverAndChangeTurn(); return; }
     
+    // オンライン時はアクションカード使用後にFirebaseを更新
+    if (isOnlineMode) {
+        db.ref('rooms/' + currentRoomId).update({
+            boardData: boardData,
+            hpYellow: hpYellow,
+            hpPurple: hpPurple
+        });
+    }
+
     if (timeLeft <= 0) {
         autoPlayTimeout();
     }
@@ -884,13 +1006,13 @@ async function animateGPFly(startIndex, playerColor, group) {
     if (group === 'マフィアンコミュニティー') color = '#e74c3c';
     
     const cell = boardElement.children[startIndex];
-    if (!cell) return; // ←【修正】安全対策
+    if (!cell) return;
     
     const cellRect = cell.getBoundingClientRect();
     
     const gpBtnId = playerColor === myColor ? 'gp-btn-bottom' : 'gp-btn-top'; 
     const gpBtn = document.getElementById(gpBtnId);
-    if (!gpBtn) return; // ←【修正】安全対策
+    if (!gpBtn) return;
     
     const btnRect = gpBtn.getBoundingClientRect();
     
@@ -910,7 +1032,6 @@ async function animateGPFly(startIndex, playerColor, group) {
     particle.remove();
 }
 
-// 完全にオリジナルの executeCombat
 async function executeCombat(index, playerColor, selectedCard) {
     const result = getFlippableAndTriggers(index, playerColor);
     const costStatus = checkCostStatus(selectedCard, playerColor);
@@ -1132,14 +1253,14 @@ async function executeCombat(index, playerColor, selectedCard) {
     return false;
 }
 
-// 完全にオリジナルの placeStone に差し替え（＋修正）
+// 石置き関数の修正（オンライン同期対応）
 async function placeStone(index) {
     if (currentPlayer !== myColor || window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     if (getFlippableAndTriggers(index, currentPlayer).flippable.length === 0) return;
     
     const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
     const selectedCard = hand[window.selectedHandIndex];
-    if (!selectedCard) return; // ←【修正】安全対策
+    if (!selectedCard) return;
 
     window.isBoardSelecting = true;
     
@@ -1148,16 +1269,31 @@ async function placeStone(index) {
     
     boardContainer.classList.add('tilted');
     document.querySelectorAll('.highlight-box').forEach(el => el.remove());
-    if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+    if (svgGroup) svgGroup.innerHTML = '';
 
-    // ←【修正】try...catchブロックでエラー時も進行を止めない
     try {
         await executeCombat(index, currentPlayer, selectedCard);
+        
+        // オンラインの場合は結果をFirebaseに反映
+        if (isOnlineMode) {
+            db.ref('rooms/' + currentRoomId).update({
+                boardData: boardData,
+                hpYellow: hpYellow,
+                hpPurple: hpPurple,
+                currentPlayer: currentPlayer === 'yellow' ? 'purple' : 'yellow'
+            });
+        }
     } catch (error) {
         console.error("戦闘処理中にエラーが発生しました:", error);
     } finally {
         window.isBoardSelecting = false;
-        checkGameOverAndChangeTurn();
+        
+        // オフラインの場合は直接ターン切り替え、オンラインはリスナー経由で切り替え
+        if (!isOnlineMode) {
+            checkGameOverAndChangeTurn();
+        } else if (hpYellow <= 0 || hpPurple <= 0 || !boardData.includes(null)) {
+            setTimeout(() => alert(`ゲーム終了！`), 100);
+        }
     }
 }
 
@@ -1192,14 +1328,18 @@ function startTurn() {
     
     drawCards(currentPlayer, 4); updateHPUI();
     document.querySelectorAll('.highlight-box').forEach(el => el.remove()); 
-    if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+    if (svgGroup) svgGroup.innerHTML = '';
     
     clearInterval(timerId); timeLeft = 30; timeLeftDisplay.textContent = timeLeft;
     const isMe = currentPlayer === myColor; 
-    logDisplay.textContent = ""; 
+    logDisplay.textContent = isMe ? "あなたのターンです" : "相手のターンです..."; 
     renderBoard(); renderHands();
     
-    if (!isMe) { setTimeout(autoPlayOpponent, 1500); return; }
+    // オフラインの相手ターンのみAIを動かす
+    if (!isMe) { 
+        if (!isOnlineMode) setTimeout(autoPlayOpponent, 1500); 
+        return; 
+    }
 
     timerId = setInterval(async () => { 
         timeLeft--; timeLeftDisplay.textContent = timeLeft; 
@@ -1229,29 +1369,44 @@ async function autoPlayTimeout() {
                 let move = validMoves[Math.floor(Math.random() * validMoves.length)];
                 boardContainer.classList.add('tilted');
                 document.querySelectorAll('.highlight-box').forEach(el => el.remove()); 
-                if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+                if (svgGroup) svgGroup.innerHTML = '';
                 
                 let discarded = hand[hand.indexOf(c)];
                 hand[hand.indexOf(c)] = null;
                 
-                // ←【修正】try...catch
                 try {
                     await executeCombat(move, currentPlayer, discarded);
+                    
+                    if (isOnlineMode) {
+                        db.ref('rooms/' + currentRoomId).update({
+                            boardData: boardData,
+                            hpYellow: hpYellow,
+                            hpPurple: hpPurple,
+                            currentPlayer: currentPlayer === 'yellow' ? 'purple' : 'yellow'
+                        });
+                    }
                 } catch (error) {
                     console.error("時間切れ処理中の戦闘エラー:", error);
                 }
                 
                 window.isBoardSelecting = false;
-                setTimeout(checkGameOverAndChangeTurn, 1000); return;
+                if (!isOnlineMode) setTimeout(checkGameOverAndChangeTurn, 1000); 
+                return;
             }
         }
     }
     logDisplay.textContent = "配置可能キャラなし！パスします。";
     window.isBoardSelecting = false;
-    setTimeout(checkGameOverAndChangeTurn, 1000);
+    
+    if (isOnlineMode) {
+        db.ref('rooms/' + currentRoomId).update({
+            currentPlayer: currentPlayer === 'yellow' ? 'purple' : 'yellow'
+        });
+    } else {
+        setTimeout(checkGameOverAndChangeTurn, 1000);
+    }
 }
 
-// 完全にオリジナルの autoPlayOpponent
 async function autoPlayOpponent() {
     const hand = opColor === 'yellow' ? handYellow : handPurple;
     
@@ -1272,7 +1427,6 @@ async function autoPlayOpponent() {
         let discarded = hand[hand.indexOf(randChar)];
         hand[hand.indexOf(randChar)] = null;
         
-        // ←【修正】try...catch
         try {
             await executeCombat(validMoves[Math.floor(Math.random() * validMoves.length)], currentPlayer, discarded);
         } catch (error) {
@@ -1368,16 +1522,4 @@ window.toggleGPPool = function(playerCol) {
     
     document.getElementById(footerId).textContent = `残りデッキ ${deckLen}枚 / 捨て場 C:${dChar} A:${dAct}`;
     panel.style.display = 'flex';
-
-    window.selectDeck = function(deckName) {
-    myDeckChoice = deckName;
-    document.getElementById('deck-select-overlay').style.display = 'none';
-    
-    if (isOnlineMode) {
-        startOnlineMatchmaking(deckName); // オンライン用の関数へ
-    } else {
-        startOfflineGame(deckName); // 既存のオフライン用の関数へ
-    }
-};
-
 };
