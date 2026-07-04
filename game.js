@@ -1,5 +1,4 @@
 // ====== Firebase 初期化設定 ======
-// ※ここに取得したご自身のキーを上書きしてください
 const firebaseConfig = {
     apiKey: "AIzaSyDd2LuXOjqcd30qNM3YZ-5kRxxWFhKvJ_k",
     authDomain: "aribato-134a7.firebaseapp.com",
@@ -175,7 +174,6 @@ window.joinRoom = async function() {
             alert("その部屋は既に対戦中です。");
         }
     } catch (e) {
-        // セキュリティルールが設定されていないと、ここでエラーが出ます
         alert("通信エラー: Firebaseのルール設定が公開(true)になっているか確認してください。詳細: " + e.message);
     }
 };
@@ -196,7 +194,7 @@ window.startOfflineGame = function(selectedDeck) {
         purple: myColor === 'purple' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck)
     };
     
-    initGameStateAndUI();
+    initGameStateAndUI(myColor);
     startMulliganPhase();
 };
 
@@ -211,18 +209,18 @@ window.startOnlineGame = function(assignedColor, myDeckData, oppDeckData) {
         purple: myColor === 'purple' ? myDeckData : oppDeckData
     };
 
-    initGameStateAndUI();
+    initGameStateAndUI(myColor);
     listenForOpponentMoves();
     startMulliganPhase();
 };
 
-function initGameStateAndUI() {
+function initGameStateAndUI(col) {
     const botBadge = document.getElementById('turn-badge-bottom');
     const topBadge = document.getElementById('turn-badge-top');
-    botBadge.textContent = myColor === 'yellow' ? '先攻' : '後攻';
-    topBadge.textContent = myColor === 'yellow' ? '後攻' : '先攻';
-    botBadge.className = 'turn-badge ' + (myColor === 'yellow' ? 'badge-yellow' : 'badge-purple');
-    topBadge.className = 'turn-badge ' + (myColor === 'yellow' ? 'badge-purple' : 'badge-yellow');
+    botBadge.textContent = col === 'yellow' ? '先攻' : '後攻';
+    topBadge.textContent = col === 'yellow' ? '後攻' : '先攻';
+    botBadge.className = 'turn-badge ' + (col === 'yellow' ? 'badge-yellow' : 'badge-purple');
+    topBadge.className = 'turn-badge ' + (col === 'yellow' ? 'badge-purple' : 'badge-yellow');
 
     handYellow = [null, null, null, null]; 
     handPurple = [null, null, null, null];
@@ -241,11 +239,22 @@ function initGameStateAndUI() {
     boardData[21] = { color: 'purple', type: 'stone', name: '' };
 }
 
-// ====== Firebase 受信処理 ======
+function sendMoveToFirebase(moveType, dataPayload) {
+    if (!isOnlineMode || !currentRoomId) return;
+    try {
+        db.ref('rooms/' + currentRoomId + '/moves').push({
+            player: myColor,
+            type: moveType,
+            data: dataPayload,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+    } catch(e) {}
+}
+
 function listenForOpponentMoves() {
     db.ref('rooms/' + currentRoomId + '/moves').on('child_added', async (snapshot) => {
         const move = snapshot.val();
-        if (move.player === myColor) return; // 自分自身の通信は無視
+        if (move.player === myColor) return; // 自分の送信は無視
         
         if (move.type === 'mulliganReady') {
             opMulliganReady = true;
@@ -254,34 +263,14 @@ function listenForOpponentMoves() {
                 startTurn();
             }
         } else if (move.type === 'placeStone') {
-            await executeRemotePlaceStone(move.data.index, move.data.handIndex, move.data.cardData);
+            await placeStone(move.data.index, true, move.data, false);
         } else if (move.type === 'playAction') {
-            await playActionCard(move.data.handIndex);
+            await playActionCard(move.data.handIndex, true, move.data, false);
         } else if (move.type === 'passTurn') {
             checkGameOverAndChangeTurn();
         }
     });
 }
-
-// 相手から送られてきた配置処理を再現する（UIロック回避用）
-async function executeRemotePlaceStone(index, handIndex, cardData) {
-    window.isBoardSelecting = true;
-    const hand = opColor === 'yellow' ? handYellow : handPurple;
-    hand[handIndex] = null;
-    
-    boardContainer.classList.add('tilted');
-    document.querySelectorAll('.highlight-box').forEach(el => el.remove());
-    svgGroup.innerHTML = '';
-
-    await executeCombat(index, opColor, cardData);
-    
-    window.isBoardSelecting = false;
-    checkGameOverAndChangeTurn();
-}
-
-// ==========================================
-// ゲーム進行処理（元のままのコード）
-// ==========================================
 
 function ensureCharacterInHand(player) {
     const hand = player === 'yellow' ? handYellow : handPurple;
@@ -410,7 +399,7 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
     if (validCards.length === 0) return [];
     if (filterType !== 'debuff' && validCards.length <= count) return [...validCards];
 
-    // CPUやネットワーク相手の場合はランダム選択して返す（対人実装前の純粋な仕様）
+    // CPUやネットワーク相手の場合はUIを出さずランダム選択
     if (actingPlayer !== myColor) {
         if (filterType === 'debuff') return rawHand.filter(c => c && c.type === 'character').sort(() => 0.5 - Math.random()).slice(0, count);
         return validCards.sort(() => 0.5 - Math.random()).slice(0, count);
@@ -731,8 +720,7 @@ async function startMulliganPhase() {
         
         if (isOnlineMode) {
             myMulliganReady = true;
-            try { db.ref('rooms/' + currentRoomId + '/moves').push({ player: myColor, type: 'mulliganReady' }); } catch(e){}
-            
+            sendMoveToFirebase('mulliganReady', { ready: true });
             if (!opMulliganReady) {
                 document.getElementById('waiting-overlay').style.display = 'flex';
                 document.getElementById('display-room-id').textContent = "相手の準備を待っています...";
@@ -757,236 +745,342 @@ async function animateHandCard(card, playerColor, animClass) {
     await sleep(500);
 }
 
-// ====== カード配置（オンライン影響排除版） ======
-async function placeStone(index) {
-    if (currentPlayer !== myColor || window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
-    if (getFlippableAndTriggers(index, currentPlayer).flippable.length === 0) return;
-    
-    window.isBoardSelecting = true;
-    
-    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
-    const selectedCard = hand[window.selectedHandIndex];
-    const handIndex = window.selectedHandIndex;
-    
-    hand[window.selectedHandIndex] = null;
-    window.selectedHandIndex = null;
-    
-    boardContainer.classList.add('tilted');
-    document.querySelectorAll('.highlight-box').forEach(el => el.remove());
-    svgGroup.innerHTML = '';
-
-    // オンラインなら送信するだけ（処理は止めない）
-    if (isOnlineMode) {
-        try {
-            db.ref('rooms/' + currentRoomId + '/moves').push({
-                type: 'placeStone', player: myColor, index: index, handIndex: handIndex, cardData: selectedCard
-            });
-        } catch(e) {}
-    }
-
-    await executeCombat(index, currentPlayer, selectedCard);
-    
-    window.isBoardSelecting = false;
-    checkGameOverAndChangeTurn();
-}
-
-// ====== アクションカード（オンライン影響排除版） ======
-async function playActionCard(index) {
-    if (actionUsedThisTurn || window.isBoardSelecting || window.isBoardTargeting) return;
-    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
-    const card = hand[index];
-    if (!card) return;
-    if (checkCostStatus(card, currentPlayer) !== 'OK') return;
-
-    window.isBoardSelecting = true;
+// CPU用の自動対象抽出
+function getCPUTargetData(card, handIndex, hand, oppHand) {
+    let targetData = {};
     const id = card.id;
-    let preSelectedCards = [];
-    
-    // オンラインなら送信するだけ（処理は止めない）
-    if (isOnlineMode && currentPlayer === myColor) {
-        try {
-            db.ref('rooms/' + currentRoomId + '/moves').push({
-                type: 'playAction', player: myColor, handIndex: index, cardData: card
-            });
-        } catch(e) {}
+    if (id === "0004" || id === "0010" || id === "A199") {
+        const valid = hand.map((c, i) => c !== null && i !== handIndex ? i : -1).filter(i => i !== -1);
+        if (valid.length > 0) { targetData.discardHandIdx = valid[0]; targetData.discardCardData = hand[valid[0]]; }
     }
-    
-    if (id === "A199") { 
-        preSelectedCards = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
+    else if (id === "0046" || id === "0048" || id === "A200") {
+        const valid = hand.map((c, i) => c !== null && i !== handIndex ? i : -1).filter(i => i !== -1);
+        if (valid.length > 0) targetData.returnHandIdx = valid[0];
     }
-    
-    actionUsedThisTurn = true;
-    let discarded = hand[index];
-    hand[index] = null;
-    if (currentPlayer === 'yellow') discardYellow.push(discarded); else discardPurple.push(discarded);
-    logDisplay.textContent = `⚡アクション[${discarded.name}]使用！`; 
-    renderHands();
-    await sleep(300);
-
-    if (id === "A043") {
-        const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-        targets.forEach(c => c.atk += 7);
+    else if (id === "0070") {
+        const valid = oppHand.map((c, i) => c && c.type === 'character' ? i : -1).filter(i => i !== -1);
+        if (valid.length > 0) targetData.debuffHandIdx = valid[0];
     }
-    else if (id === "A044") {
-        const chars = hand.filter(c => c && c.type === 'character');
-        const targets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
-        targets.forEach(c => c.atk += 5);
+    else if (id === "0002" || id === "0031" || id === "A043" || id === "A039") {
+        const valid = hand.map((c, i) => c && c.type === 'character' && i !== handIndex ? i : -1).filter(i => i !== -1);
+        if (valid.length > 0) targetData.buffHandIdx = valid[0];
     }
-    else if (id === "A039") {
-        const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-        targets.forEach(c => c.atk += 3);
-    }
-    else if (id === "A040") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        const idx = deck.findIndex(c => c && c.group === '287期受験生' && c.type === 'character');
-        if (idx !== -1) {
-            const drawnCard = deck.splice(idx, 1)[0];
-            drawnCard.atk += 5;
-            const emptyIdx = hand.indexOf(null);
-            if (emptyIdx !== -1) hand[emptyIdx] = drawnCard;
-            else deck.push(drawnCard);
-        }
-    }
-    else if (id === "A041") {
-        if (currentPlayer === 'yellow') hpYellow += 7; else hpPurple += 7;
-        await showDamageAnimation(`回復 7`, currentPlayer, 'heal');
-    }
-    else if (id === "A042") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.filter(c => c && c.type === 'character').forEach(c => c.atk += 2);
-    }
-    else if (id === "A152") {
-        hand.filter(c => c && c.type === 'character').forEach(c => c.atk += 1);
-    }
-    else if (id === "A198") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.filter(c => c && c.type === 'character').forEach(c => c.atk += 1);
-    }
-    else if (id === "A199") {
-        for (let c of preSelectedCards) {
-            await animateHandCard(c, currentPlayer, 'card-discard-anim');
-            hand[hand.indexOf(c)] = null;
-            if (currentPlayer === 'yellow') discardYellow.push(c); else discardPurple.push(c);
-        }
-    }
-    else if (id === "A158") {
-        drawCards(currentPlayer, 1); 
-    }
-    else if (id === "A087") {
-        await animateGPFly(14, currentPlayer, '幻影旅団');
-        playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        const chars = oppHand.filter(c => c && c.type === 'character');
-        if (chars.length > 0) {
-            const target = chars[Math.floor(Math.random() * chars.length)];
-            target.atk = Math.max(0, target.atk - 4);
-            logDisplay.textContent = `相手の手札のATKを-4!`;
-        }
-    }
-    else if (id === "A082") {
-        const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
-        await animateGPFly(14, currentPlayer, '幻影旅団');
-        playerGP[currentPlayer].gp['幻影旅団'] = beforeGP + 1;
-        if (beforeGP >= 10) {
-            if (currentPlayer === 'yellow') hpYellow += 11; else hpPurple += 11;
-            await showDamageAnimation(`回復 11`, currentPlayer, 'heal');
-        }
-    }
-    else if (id === "A084") {
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        oppHand.filter(c => c && c.type === 'character').forEach(c => {
-            c.atk = Math.max(0, c.atk - 4);
-        });
-        logDisplay.textContent = `相手の手札すべてのATKを-4!`;
-        renderHands();
-        await sleep(500);
-    }
-    else if (id === "A085") {
-        if (currentPlayer === 'yellow') hpYellow += 10; else hpPurple += 10;
-        await showDamageAnimation(`回復 10`, currentPlayer, 'heal');
+    else if (id === "0028" || id === "A044") {
+        const chars = hand.map((c, i) => c && c.type === 'character' && i !== handIndex ? i : -1).filter(i => i !== -1);
+        targetData.buffHandIndices = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
     }
     else if (id === "A086") {
+        const oppColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
         const oppCharIndices = [];
-        boardData.forEach((c, idx) => { if (c && c.type === 'character' && c.color === opColor) oppCharIndices.push(idx); });
-        
-        if (oppCharIndices.length === 0) {
-            logDisplay.textContent = '効果対象なし';
-            await sleep(1000);
-        } else {
-            let targetIdx = -1;
-            if (currentPlayer !== myColor) {
-                targetIdx = oppCharIndices[Math.floor(Math.random() * oppCharIndices.length)];
-            } else {
-                logDisplay.textContent = '空にする相手のキャラを選択してください';
-                targetIdx = await selectBoardTarget(oppCharIndices);
+        boardData.forEach((c, idx) => { if (c && c.type === 'character' && c.color === oppColor) oppCharIndices.push(idx); });
+        if (oppCharIndices.length > 0) targetData.targetBoardIdx = oppCharIndices[Math.floor(Math.random() * oppCharIndices.length)];
+    }
+    else if (id === "A087" || id === "A083") {
+        const chars = oppHand.map((c, i) => c && (id==="A087" ? c.type === 'character' : (c.cost.specific + c.cost.free) <= 3) ? i : -1).filter(i => i !== -1);
+        if (chars.length > 0) {
+            if (id==="A087") targetData.debuffHandIdx = chars[Math.floor(Math.random() * chars.length)];
+            else targetData.discardHandIdx = chars[Math.floor(Math.random() * chars.length)];
+        }
+    }
+    return targetData;
+}
+
+// 完全に安全化されたアクションカード処理
+async function playActionCard(index, isFromNetwork = false, incomingTargetData = {}, isCPU = false) {
+    const isHuman = !isFromNetwork && !isCPU;
+
+    if (isHuman) {
+        if (actionUsedThisTurn || window.isBoardSelecting || window.isBoardTargeting) return;
+        if (currentPlayer !== myColor) return;
+    }
+
+    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+    if (isFromNetwork && incomingTargetData && incomingTargetData.cardData) {
+        hand[index] = incomingTargetData.cardData; 
+    }
+    
+    const card = hand[index];
+    if (!card) return;
+
+    if (isHuman) {
+        if (checkCostStatus(card, currentPlayer) !== 'OK') return;
+        window.isBoardSelecting = true;
+    }
+
+    try {
+        const id = card.id;
+        let targetData = isFromNetwork || isCPU ? (incomingTargetData.targets || incomingTargetData) : {};
+        const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
+        const oppHand = opponentColor === 'yellow' ? handYellow : handPurple;
+
+        if (isHuman) {
+            if (id === "A199") { 
+                const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
+                if(targets.length > 0) {
+                    targetData.discardHandIdx = hand.indexOf(targets[0]);
+                    targetData.discardCardData = targets[0];
+                }
+            } else if (id === "A043" || id === "A039") {
+                const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+                if(targets.length > 0) targetData.buffHandIdx = hand.indexOf(targets[0]);
+            } else if (id === "A044") {
+                const chars = hand.map((c, i) => c && c.type === 'character' ? i : -1).filter(i => i !== -1);
+                targetData.buffHandIndices = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
+            } else if (id === "A086") {
+                const oppCharIndices = [];
+                boardData.forEach((c, idx) => { if (c && c.type === 'character' && c.color === opponentColor) oppCharIndices.push(idx); });
+                if (oppCharIndices.length > 0) {
+                    logDisplay.textContent = '空にする相手のキャラを選択してください';
+                    targetData.targetBoardIdx = await selectBoardTarget(oppCharIndices);
+                }
+            } else if (id === "A087") {
+                const chars = oppHand.map((c, i) => c && c.type === 'character' ? i : -1).filter(i => i !== -1);
+                if (chars.length > 0) targetData.debuffHandIdx = chars[Math.floor(Math.random() * chars.length)];
+            } else if (id === "A083") {
+                const valid = oppHand.map((c, i) => c && (c.cost.specific + c.cost.free) <= 3 ? i : -1).filter(i => i !== -1);
+                if (valid.length > 0) targetData.discardHandIdx = valid[Math.floor(Math.random() * valid.length)];
+            } else if (id === "A200") {
+                const nonNulls = hand.map((c, i) => c !== null && i !== index ? i : -1).filter(i => i !== -1);
+                if (nonNulls.length > 0) {
+                    const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
+                    if (targets.length > 0) targetData.returnHandIdx = hand.indexOf(targets[0]);
+                }
             }
-            if (targetIdx !== -1) {
-                boardData[targetIdx] = { color: opColor, type: 'stone', name: '' };
+
+            if (isOnlineMode) {
+                const cleanData = JSON.parse(JSON.stringify({ handIndex: index, cardData: card, targets: targetData }));
+                sendMoveToFirebase('playAction', cleanData);
+            }
+        }
+
+        actionUsedThisTurn = true;
+        let discarded = hand[index];
+        hand[index] = null;
+        if (currentPlayer === 'yellow') discardYellow.push(discarded); else discardPurple.push(discarded);
+        logDisplay.textContent = `⚡アクション[${discarded.name}]使用！`; 
+        renderHands();
+        await sleep(300);
+
+        if (id === "A043") {
+            if(targetData.buffHandIdx !== undefined) hand[targetData.buffHandIdx].atk += 7;
+        }
+        else if (id === "A044") {
+            if(targetData.buffHandIndices) targetData.buffHandIndices.forEach(i => hand[i].atk += 5);
+        }
+        else if (id === "A039") {
+            if(targetData.buffHandIdx !== undefined) hand[targetData.buffHandIdx].atk += 3;
+        }
+        else if (id === "A040") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            const idx = deck.findIndex(c => c && c.group === '287期受験生' && c.type === 'character');
+            if (idx !== -1) {
+                const drawnCard = deck.splice(idx, 1)[0];
+                drawnCard.atk += 5;
+                const emptyIdx = hand.indexOf(null);
+                if (emptyIdx !== -1) hand[emptyIdx] = drawnCard;
+                else deck.push(drawnCard);
+            }
+        }
+        else if (id === "A041") {
+            if (currentPlayer === 'yellow') hpYellow += 7; else hpPurple += 7;
+            await showDamageAnimation(`回復 7`, currentPlayer, 'heal');
+        }
+        else if (id === "A042") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            deck.filter(c => c && c.type === 'character').forEach(c => c.atk += 2);
+        }
+        else if (id === "A152") {
+            hand.filter(c => c && c.type === 'character').forEach(c => c.atk += 1);
+        }
+        else if (id === "A198") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            deck.filter(c => c && c.type === 'character').forEach(c => c.atk += 1);
+        }
+        else if (id === "A199") {
+            if(targetData.discardHandIdx !== undefined) {
+                if ((isFromNetwork || isCPU) && targetData.discardCardData) hand[targetData.discardHandIdx] = targetData.discardCardData;
+                const target = hand[targetData.discardHandIdx];
+                await animateHandCard(target, currentPlayer, 'card-discard-anim');
+                hand[targetData.discardHandIdx] = null;
+                if (currentPlayer === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+            }
+        }
+        else if (id === "A158") {
+            drawCards(currentPlayer, 1); 
+        }
+        else if (id === "A087") {
+            await animateGPFly(14, currentPlayer, '幻影旅団');
+            playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
+            if(targetData.debuffHandIdx !== undefined) {
+                const target = oppHand[targetData.debuffHandIdx];
+                target.atk = Math.max(0, target.atk - 4);
+                logDisplay.textContent = `相手の手札のATKを-4!`;
+            }
+        }
+        else if (id === "A082") {
+            const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
+            await animateGPFly(14, currentPlayer, '幻影旅団');
+            playerGP[currentPlayer].gp['幻影旅団'] = beforeGP + 1;
+            if (beforeGP >= 10) {
+                if (currentPlayer === 'yellow') hpYellow += 11; else hpPurple += 11;
+                await showDamageAnimation(`回復 11`, currentPlayer, 'heal');
+            }
+        }
+        else if (id === "A084") {
+            oppHand.filter(c => c && c.type === 'character').forEach(c => {
+                c.atk = Math.max(0, c.atk - 4);
+            });
+            logDisplay.textContent = `相手の手札すべてのATKを-4!`;
+            renderHands();
+            await sleep(500);
+        }
+        else if (id === "A085") {
+            if (currentPlayer === 'yellow') hpYellow += 10; else hpPurple += 10;
+            await showDamageAnimation(`回復 10`, currentPlayer, 'heal');
+        }
+        else if (id === "A086") {
+            if(targetData.targetBoardIdx !== undefined && targetData.targetBoardIdx !== -1) {
+                boardData[targetData.targetBoardIdx] = { color: opponentColor, type: 'stone', name: '' };
                 logDisplay.textContent = 'キャラを空のカードにしました';
                 renderBoard();
                 await sleep(500);
+            } else {
+                logDisplay.textContent = '効果対象なし';
+                await sleep(1000);
             }
         }
-    }
-    else if (id === "A083") {
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        const validTargets = oppHand.filter(c => c && (c.cost.specific + c.cost.free) <= 3);
-        if (validTargets.length === 0) {
-            logDisplay.textContent = '効果対象なし';
+        else if (id === "A083") {
+            if(targetData.discardHandIdx !== undefined) {
+                const target = oppHand[targetData.discardHandIdx];
+                await animateHandCard(target, opponentColor, 'card-discard-anim');
+                oppHand[targetData.discardHandIdx] = null;
+                if (opponentColor === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+                logDisplay.textContent = `相手のカードを捨てさせた!`;
+            } else {
+                logDisplay.textContent = '効果対象なし';
+                await sleep(1000);
+            }
+        }
+        else if (id === "A163") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) >= 3);
+            if (targetIdx !== -1) {
+                const drawn = deck.splice(targetIdx, 1)[0];
+                const emptyIdx = hand.indexOf(null);
+                if (emptyIdx !== -1) hand[emptyIdx] = drawn;
+                else deck.push(drawn);
+                logDisplay.textContent = 'キャラを引いた!';
+            } else {
+                logDisplay.textContent = '効果対象なし';
+            }
             await sleep(1000);
-        } else {
-            const target = validTargets[Math.floor(Math.random() * validTargets.length)];
-            await animateHandCard(target, opColor, 'card-discard-anim');
-            oppHand[oppHand.indexOf(target)] = null;
-            if (opColor === 'yellow') discardYellow.push(target); else discardPurple.push(target);
-            logDisplay.textContent = `相手のカードを捨てさせた!`;
         }
-    }
-    else if (id === "A163") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) >= 3);
-        if (targetIdx !== -1) {
-            const drawn = deck.splice(targetIdx, 1)[0];
-            const emptyIdx = hand.indexOf(null);
-            if (emptyIdx !== -1) hand[emptyIdx] = drawn;
-            else deck.push(drawn);
-            logDisplay.textContent = 'キャラを引いた!';
-        } else {
-            logDisplay.textContent = '効果対象なし';
-        }
-        await sleep(1000);
-    }
-    else if (id === "A200") {
-        const nonNulls = hand.filter(c => c !== null);
-        if (nonNulls.length > 0) {
-            const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
-            if (targets.length > 0) {
-                const target = targets[0];
+        else if (id === "A200") {
+            if(targetData.returnHandIdx !== undefined) {
+                const target = hand[targetData.returnHandIdx];
                 await animateHandCard(target, currentPlayer, 'card-return-anim');
-                hand[hand.indexOf(target)] = null;
+                hand[targetData.returnHandIdx] = null;
                 const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
                 deck.push(target);
                 shuffleDeck(deck);
             }
         }
-    }
-    else if (id === "A201") {
-        drawCards(currentPlayer, 1);
-    }
-    
-    updateHPUI(); renderHands(); updateHighlightsAndLines();
-    
-    window.isBoardSelecting = false;
-    
-    if (hpYellow <= 0 || hpPurple <= 0) { checkGameOverAndChangeTurn(); return; }
-    
-    if (timeLeft <= 0) {
-        autoPlayTimeout();
+        else if (id === "A201") {
+            drawCards(currentPlayer, 1);
+        }
+        
+        updateHPUI(); renderHands(); updateHighlightsAndLines();
+        if (hpYellow <= 0 || hpPurple <= 0) { checkGameOverAndChangeTurn(); return; }
+
+    } catch (e) {
+        console.error("Action Card Error:", e);
+    } finally {
+        if (isHuman) window.isBoardSelecting = false;
     }
 }
 
-// ====== コンバット実行（元の完全なコード） ======
-async function executeCombat(index, playerColor, selectedCard) {
+// 完全に安全化された配置処理
+async function placeStone(index, isFromNetwork = false, incomingData = {}, isCPU = false) {
+    const isHuman = !isFromNetwork && !isCPU;
+
+    if (isHuman) {
+        if (currentPlayer !== myColor) return; 
+        if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
+        if (getFlippableAndTriggers(index, currentPlayer).flippable.length === 0) return;
+        window.isBoardSelecting = true;
+    }
+    
+    try {
+        const handIndex = isHuman ? window.selectedHandIndex : incomingData.handIndex;
+        const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+        
+        if (isFromNetwork && incomingData.cardData) {
+            hand[handIndex] = incomingData.cardData; 
+        }
+        
+        const selectedCard = hand[handIndex];
+        if (!selectedCard) return;
+
+        let targetData = isHuman ? {} : (incomingData.targets || {});
+
+        if (isHuman) {
+            const costStatus = checkCostStatus(selectedCard, currentPlayer);
+            let triggerMet = checkAbilityMet(selectedCard, index, getFlippableAndTriggers(index, currentPlayer).flippable, currentPlayer);
+            
+            if (costStatus === 'OK' && triggerMet) {
+                const oppColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
+                if (selectedCard.id === "0004" || selectedCard.id === "0010") {
+                    const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
+                    if(targets.length > 0) {
+                        targetData.discardHandIdx = hand.indexOf(targets[0]);
+                        targetData.discardCardData = targets[0];
+                    }
+                }
+                else if (selectedCard.id === "0046" || selectedCard.id === "0048") {
+                    const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
+                    if(targets.length > 0) targetData.returnHandIdx = hand.indexOf(targets[0]);
+                }
+                else if (selectedCard.id === "0070") {
+                    const oppHand = oppColor === 'yellow' ? handYellow : handPurple;
+                    const targets = await selectHandCardsTarget(currentPlayer, oppColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
+                    if(targets.length > 0) targetData.debuffHandIdx = oppHand.indexOf(targets[0]);
+                }
+                else if (selectedCard.id === "0002" || selectedCard.id === "0031") {
+                    hand[handIndex] = null; 
+                    const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+                    hand[handIndex] = selectedCard; 
+                    if(targets.length > 0) targetData.buffHandIdx = hand.indexOf(targets[0]);
+                }
+                else if (selectedCard.id === "0028") {
+                    const chars = hand.map((c, i) => c && c.type === 'character' && i !== handIndex ? i : -1).filter(i => i !== -1);
+                    targetData.buffHandIndices = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
+                }
+            }
+            
+            if (isOnlineMode) {
+                const cleanData = JSON.parse(JSON.stringify({ index: index, handIndex: handIndex, cardData: selectedCard, targets: targetData }));
+                sendMoveToFirebase('placeStone', cleanData);
+            }
+        }
+
+        hand[handIndex] = null;
+        if (isHuman) window.selectedHandIndex = null;
+        
+        boardContainer.classList.add('tilted');
+        document.querySelectorAll('.highlight-box').forEach(el => el.remove());
+        svgGroup.innerHTML = '';
+
+        await executeCombat(index, currentPlayer, selectedCard, targetData);
+
+    } catch (e) {
+        console.error("PlaceStone Error:", e);
+    } finally {
+        if (isHuman) window.isBoardSelecting = false;
+        checkGameOverAndChangeTurn();
+    }
+}
+
+async function executeCombat(index, playerColor, selectedCard, targetData = {}) {
     const result = getFlippableAndTriggers(index, playerColor);
     const costStatus = checkCostStatus(selectedCard, playerColor);
     const opponentColor = playerColor === 'yellow' ? 'purple' : 'yellow';
@@ -1025,11 +1119,7 @@ async function executeCombat(index, playerColor, selectedCard) {
     const popup = document.createElement('div');
     popup.className = 'damage-popup normal';
     document.getElementById('app-container').appendChild(popup);
-    
-    await sleep(50);
-    popup.textContent = baseAtk;
-    popup.classList.add('show');
-    await sleep(600);
+    await sleep(50); popup.textContent = baseAtk; popup.classList.add('show'); await sleep(600);
 
     let totalNormalDamage = baseAtk;
     if (flipBonus > 0) {
@@ -1041,7 +1131,6 @@ async function executeCombat(index, playerColor, selectedCard) {
     }
 
     let { finalDamage: nFinalDmg, reduction: nRed } = applyDamageReduction(totalNormalDamage, 'normal', targetPlayer);
-    
     if (nRed > 0) {
         popup.textContent = `-${nRed}`;
         popup.className = 'damage-popup reduce show';
@@ -1058,7 +1147,7 @@ async function executeCombat(index, playerColor, selectedCard) {
     popup.remove();
     await sleep(200);
 
-    if (hpYellow <= 0 || hpPurple <= 0) return true; 
+    if (hpYellow <= 0 || hpPurple <= 0) return;
 
     let abilityDamage = 0;
     if (finalCard.ability && finalCard.ability.text && triggerMet) {
@@ -1106,8 +1195,7 @@ async function executeCombat(index, playerColor, selectedCard) {
         if (playerColor === 'yellow') hpPurple -= aFinalDmg; else hpYellow -= aFinalDmg;
         updateHPUI();
         await sleep(200);
-        
-        if (hpYellow <= 0 || hpPurple <= 0) return true;
+        if (hpYellow <= 0 || hpPurple <= 0) return; 
     }
 
     for (let tIdx of result.triggers) {
@@ -1133,8 +1221,7 @@ async function executeCombat(index, playerColor, selectedCard) {
                 if (playerColor === 'yellow') hpPurple -= cFinalDmg; else hpYellow -= cFinalDmg;
                 updateHPUI();
                 await sleep(300);
-                
-                if (hpYellow <= 0 || hpPurple <= 0) return true;
+                if (hpYellow <= 0 || hpPurple <= 0) return; 
             }
             if (comboHeal > 0) {
                 logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
@@ -1146,50 +1233,35 @@ async function executeCombat(index, playerColor, selectedCard) {
         }
     }
 
-    let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
-
-    if (costStatus === 'OK' && triggerMet) {
-        if (finalCard.id === "0004" || finalCard.id === "0010") {
-            discardList = await selectHandCardsTarget(playerColor, playerColor, 1, '捨てるカードを選択してください', 'all');
-        }
-        if (finalCard.id === "0046" || finalCard.id === "0048") {
-            returnList = await selectHandCardsTarget(playerColor, playerColor, 1, 'デッキに戻すカードを選択してください', 'all');
-        }
-        if (finalCard.id === "0070") {
-            debuffList = await selectHandCardsTarget(playerColor, opponentColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
-        }
-        if (finalCard.id === "0002" || finalCard.id === "0031") {
-            buffTargets = await selectHandCardsTarget(playerColor, playerColor, 1, '強化するキャラを選択', 'character');
-        }
-        if (finalCard.id === "0028") {
-            const hand = playerColor === 'yellow' ? handYellow : handPurple;
-            const chars = hand.filter(c => c && c.type === 'character');
-            buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
-        }
-    }
-
     const activeHand = playerColor === 'yellow' ? handYellow : handPurple;
     
-    for (let c of discardList) {
+    if (targetData.discardHandIdx !== undefined) {
+        if (targetData.discardCardData) activeHand[targetData.discardHandIdx] = targetData.discardCardData;
+        const c = activeHand[targetData.discardHandIdx];
         await animateHandCard(c, playerColor, 'card-discard-anim');
-        activeHand[activeHand.indexOf(c)] = null;
+        activeHand[targetData.discardHandIdx] = null;
         if (playerColor === 'yellow') discardYellow.push(c); else discardPurple.push(c);
     }
-    for (let c of returnList) {
+    if (targetData.returnHandIdx !== undefined) {
+        const c = activeHand[targetData.returnHandIdx];
         await animateHandCard(c, playerColor, 'card-return-anim');
-        activeHand[activeHand.indexOf(c)] = null;
+        activeHand[targetData.returnHandIdx] = null;
         const deck = playerColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
         deck.push(c); shuffleDeck(deck);
     }
-    for (let c of debuffList) {
-        c.atk = Math.max(0, c.atk - 10);
+    if (targetData.debuffHandIdx !== undefined) {
+        const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
+        oppHand[targetData.debuffHandIdx].atk = Math.max(0, oppHand[targetData.debuffHandIdx].atk - 10);
     }
-    for (let c of buffTargets) {
-        if (finalCard.id === "0002") c.atk += 3;
-        if (finalCard.id === "0031" || finalCard.id === "0028") c.atk += 5;
+    if (targetData.buffHandIdx !== undefined) {
+        if (finalCard.id === "0002") activeHand[targetData.buffHandIdx].atk += 3;
+        if (finalCard.id === "0031") activeHand[targetData.buffHandIdx].atk += 5;
+    }
+    if (targetData.buffHandIndices) {
+        targetData.buffHandIndices.forEach(i => activeHand[i].atk += 5);
     }
 
-    if (discardList.length > 0 || returnList.length > 0 || debuffList.length > 0 || buffTargets.length > 0) {
+    if (Object.keys(targetData).length > 0) {
         renderHands();
         await sleep(300);
     }
@@ -1204,7 +1276,6 @@ async function executeCombat(index, playerColor, selectedCard) {
 
     logDisplay.textContent = ``;
     renderHands();
-    return false;
 }
 
 function checkGameOverAndChangeTurn() {
@@ -1255,12 +1326,14 @@ function startTurn() {
         timeLeft--; timeLeftDisplay.textContent = timeLeft; 
         if (timeLeft <= 0) {
             clearInterval(timerId);
-            if (window.isHandSelecting && window.autoSelectAndResolve) {
-                window.autoSelectAndResolve();
-            } else if (window.isBoardTargeting && window.autoResolveBoardTarget) {
-                window.autoResolveBoardTarget();
-            } else if (!window.isBoardSelecting && !actionUsedThisTurn) {
-                autoPlayTimeout(); 
+            if (isMe) {
+                if (window.isHandSelecting && window.autoSelectAndResolve) {
+                    window.autoSelectAndResolve();
+                } else if (window.isBoardTargeting && window.autoResolveBoardTarget) {
+                    window.autoResolveBoardTarget();
+                } else if (!window.isBoardSelecting && !actionUsedThisTurn) {
+                    autoPlayTimeout(); 
+                }
             }
         }
     }, 1000);
@@ -1268,62 +1341,68 @@ function startTurn() {
 
 async function autoPlayTimeout() {
     logDisplay.textContent = "時間切れ！自動で配置します。";
-    window.isBoardSelecting = true;
-    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
-    const chars = hand.filter(c => c && c.type === 'character');
-    if (chars.length > 0) {
-        for(let c of chars) {
-            let validMoves = [];
-            for (let i = 0; i < 36; i++) if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
-            if (validMoves.length > 0) {
-                let move = validMoves[Math.floor(Math.random() * validMoves.length)];
-                boardContainer.classList.add('tilted');
-                document.querySelectorAll('.highlight-box').forEach(el => el.remove()); svgGroup.innerHTML = '';
-                
-                let discarded = hand[hand.indexOf(c)];
-                hand[hand.indexOf(c)] = null;
-                
-                if (isOnlineMode) {
-                    try { db.ref('rooms/' + currentRoomId + '/moves').push({ type: 'placeStone', player: myColor, index: move, handIndex: hand.indexOf(c), cardData: discarded }); } catch(e){}
+    try {
+        const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
+        const chars = hand.filter(c => c && c.type === 'character');
+        
+        if (chars.length > 0) {
+            for(let c of chars) {
+                let validMoves = [];
+                for (let i = 0; i < 36; i++) {
+                    if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
                 }
-
-                await executeCombat(move, currentPlayer, discarded);
-                window.isBoardSelecting = false;
-                setTimeout(checkGameOverAndChangeTurn, 1000); return;
+                if (validMoves.length > 0) {
+                    let moveIndex = validMoves[Math.floor(Math.random() * validMoves.length)];
+                    let handIndex = hand.indexOf(c);
+                    let targetData = getCPUTargetData(c, handIndex, hand, oppHand);
+                    
+                    await placeStone(moveIndex, false, { handIndex: handIndex, targets: targetData, cardData: c }, true);
+                    return;
+                }
             }
         }
+        logDisplay.textContent = "配置可能キャラなし！パスします。";
+        if (isOnlineMode) {
+            try { sendMoveToFirebase('passTurn', {}); } catch(e){}
+        }
+        checkGameOverAndChangeTurn();
+    } catch (e) {
+        checkGameOverAndChangeTurn();
     }
-    logDisplay.textContent = "配置可能キャラなし！パスします。";
-    window.isBoardSelecting = false;
-    if (isOnlineMode) {
-        try { db.ref('rooms/' + currentRoomId + '/moves').push({ type: 'passTurn', player: myColor }); } catch(e){}
-    }
-    setTimeout(checkGameOverAndChangeTurn, 1000);
 }
 
 async function autoPlayOpponent() {
-    const hand = opColor === 'yellow' ? handYellow : handPurple;
-    
-    const validActions = hand.filter(c => c && c.type === 'action' && checkCostStatus(c, opColor) === 'OK');
-    if (!actionUsedThisTurn && validActions.length > 0 && Math.random() > 0.5) {
-        const actionCard = validActions[Math.floor(Math.random() * validActions.length)];
-        const index = hand.indexOf(actionCard);
-        await playActionCard(index); 
-        await sleep(1000);
-    }
+    try {
+        const hand = opColor === 'yellow' ? handYellow : handPurple;
+        const oppHand = opColor === 'yellow' ? handPurple : handYellow;
+        
+        const validActions = hand.filter(c => c && c.type === 'action' && checkCostStatus(c, opColor) === 'OK');
+        if (!actionUsedThisTurn && validActions.length > 0 && Math.random() > 0.5) {
+            const actionCard = validActions[Math.floor(Math.random() * validActions.length)];
+            const index = hand.indexOf(actionCard);
+            let targetData = getCPUTargetData(actionCard, index, hand, oppHand);
+            await playActionCard(index, false, { targets: targetData, cardData: actionCard }, true); 
+            await sleep(1000);
+        }
 
-    window.isBoardSelecting = true;
-    const validMoves = [];
-    for (let i = 0; i < 36; i++) if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
-    const chars = hand.filter(c => c && c.type === 'character');
-    if (validMoves.length > 0 && chars.length > 0) {
-        const randChar = chars[Math.floor(Math.random() * chars.length)];
-        let discarded = hand[hand.indexOf(randChar)];
-        hand[hand.indexOf(randChar)] = null;
-        await executeCombat(validMoves[Math.floor(Math.random() * validMoves.length)], currentPlayer, discarded);
+        const validMoves = [];
+        for (let i = 0; i < 36; i++) if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
+        const chars = hand.filter(c => c && c.type === 'character');
+        
+        if (validMoves.length > 0 && chars.length > 0) {
+            const randChar = chars[Math.floor(Math.random() * chars.length)];
+            const handIndex = hand.indexOf(randChar);
+            const moveIndex = validMoves[Math.floor(Math.random() * validMoves.length)];
+            let targetData = getCPUTargetData(randChar, handIndex, hand, oppHand);
+            
+            await placeStone(moveIndex, false, { handIndex: handIndex, targets: targetData, cardData: randChar }, true);
+        } else {
+            checkGameOverAndChangeTurn();
+        }
+    } catch(e) {
+        checkGameOverAndChangeTurn();
     }
-    window.isBoardSelecting = false;
-    checkGameOverAndChangeTurn();
 }
 
 function renderBoard() {
