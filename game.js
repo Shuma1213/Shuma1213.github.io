@@ -22,11 +22,32 @@ animStyles.innerHTML = `
 `;
 document.head.appendChild(animStyles);
 
+// ====== UI 動的追加（タイマーの分離） ======
+// HTMLをいじらずにJS側で相手用のタイマーを右上に生成します
+const timeContainer = document.getElementById('time-container');
+if (timeContainer) {
+    timeContainer.id = 'time-container-bottom';
+    const timeBox = document.getElementById('timer-box');
+    if (timeBox) timeBox.id = 'timer-box-bottom';
+
+    const topTime = timeContainer.cloneNode(true);
+    topTime.id = 'time-container-top';
+    topTime.style.bottom = 'auto';
+    topTime.style.top = '100px';
+    topTime.style.right = '15px';
+    topTime.style.left = 'auto';
+    topTime.style.display = 'none';
+    
+    const topTimeBox = topTime.querySelector('#timer-box-bottom');
+    if (topTimeBox) topTimeBox.id = 'timer-box-top';
+
+    timeContainer.parentNode.appendChild(topTime);
+}
+
 const boardElement = document.getElementById('board');
 const boardContainer = document.getElementById('board-container');
 const svgGroup = document.getElementById('combo-lines-group');
 const logDisplay = document.getElementById('log-display');
-const timeLeftDisplay = document.getElementById('timer-box');
 const boardSize = 6;
 
 let currentRoomId = null;
@@ -171,7 +192,7 @@ window.joinRoom = function() {
     });
 };
 
-// ====== 確実なFirebase同期関数（JSON変換で配列消失を防止） ======
+// ====== 確実なFirebase同期関数 ======
 function pushGameStateToFirebase(nextPlayer = null) {
     if (!isOnlineMode) return;
     const syncData = {
@@ -184,7 +205,8 @@ function pushGameStateToFirebase(nextPlayer = null) {
         handYellowJSON: JSON.stringify(handYellow),
         handPurpleJSON: JSON.stringify(handPurple),
         discardYellowJSON: JSON.stringify(discardYellow),
-        discardPurpleJSON: JSON.stringify(discardPurple)
+        discardPurpleJSON: JSON.stringify(discardPurple),
+        activeEffectsJSON: JSON.stringify(activeEffects) // エフェクトも同期
     };
     if (nextPlayer) syncData.currentPlayer = nextPlayer;
     db.ref('rooms/' + currentRoomId).update(syncData);
@@ -203,6 +225,7 @@ function initOnlineGame() {
     currentPlayer = 'yellow';
     timeExtendCountMy = 3;
     window.opTimeExtend = 3;
+    activeEffects = [];
     
     boardData = new Array(36).fill(null);
     boardData[15] = { color: 'yellow', type: 'stone', name: '' };
@@ -223,6 +246,7 @@ function initOnlineGame() {
         if (data.discardYellowJSON) discardYellow = JSON.parse(data.discardYellowJSON);
         if (data.discardPurpleJSON) discardPurple = JSON.parse(data.discardPurpleJSON);
         if (data.playerGPJSON) playerGP = JSON.parse(data.playerGPJSON);
+        if (data.activeEffectsJSON) activeEffects = JSON.parse(data.activeEffectsJSON);
 
         if (data.hpYellow !== undefined) hpYellow = data.hpYellow;
         if (data.hpPurple !== undefined) hpPurple = data.hpPurple;
@@ -230,7 +254,17 @@ function initOnlineGame() {
         const myCount = myColor === 'yellow' ? data.timeExtendCountYellow : data.timeExtendCountPurple;
         const opCount = opColor === 'yellow' ? data.timeExtendCountYellow : data.timeExtendCountPurple;
         if (myCount !== undefined) timeExtendCountMy = myCount;
-        if (opCount !== undefined) window.opTimeExtend = opCount;
+        
+        // 相手が長考を使ったことを検知してタイマーを増やす
+        if (opCount !== undefined) {
+            if (opCount < window.opTimeExtend && currentPlayer !== myColor) {
+                timeLeft += 30;
+                const timeBoxTop = document.getElementById('timer-box-top');
+                if (timeBoxTop) timeBoxTop.textContent = timeLeft;
+                logDisplay.textContent = `⏳相手が長考(+30秒)を使用！`;
+            }
+            window.opTimeExtend = opCount;
+        }
 
         updateHPUI();
         
@@ -291,6 +325,7 @@ window.startOfflineGame = function(selectedDeck) {
     currentPlayer = 'yellow';
     timeExtendCountMy = 3;
     window.opTimeExtend = 3;
+    activeEffects = [];
     
     boardData[15] = { color: 'yellow', type: 'stone', name: '' };
     boardData[20] = { color: 'yellow', type: 'stone', name: '' };
@@ -404,37 +439,37 @@ function checkAbilityMet(card, index, flippable, playerColor) {
     return met;
 }
 
+// ====== 対象選択UI（アクションカード表示＆自動化対応） ======
 async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message, filterType = 'all') {
     const rawHand = targetPlayer === 'yellow' ? handYellow : handPurple;
-    let validCards = rawHand.filter(c => c !== null);
+    const nonNullCards = rawHand.filter(c => c !== null);
 
-    if (filterType === 'debuff') {
-        const chars = validCards.filter(c => c.type === 'character');
-        if (chars.length === 0) {
+    let selectableCards = nonNullCards;
+    if (filterType === 'character' || filterType === 'debuff') {
+        selectableCards = nonNullCards.filter(c => c.type === 'character');
+    }
+
+    // 自分が操作する場合、選択肢が少なければ自動解決してスキップ
+    if (actingPlayer === myColor) {
+        if (selectableCards.length === 0) {
             logDisplay.textContent = '効果対象なし';
             await sleep(1000);
             return [];
         }
-        if (chars.length === 1 && actingPlayer === myColor) {
-            logDisplay.textContent = `自動選択: ${chars[0].name}`;
+        if (selectableCards.length <= count) {
+            logDisplay.textContent = `自動選択: ${selectableCards.map(c=>c.name).join(', ')}`;
             await sleep(1000);
-            return [chars[0]];
+            return selectableCards;
         }
-        validCards = rawHand.filter(c => c !== null); 
-    } else if (filterType === 'character') {
-        validCards = validCards.filter(c => c.type === 'character');
-    }
-
-    if (validCards.length === 0) return [];
-    if (filterType !== 'debuff' && validCards.length <= count) return [...validCards];
-
-    if (actingPlayer !== myColor) {
-        if (filterType === 'debuff') return rawHand.filter(c => c && c.type === 'character').sort(() => 0.5 - Math.random()).slice(0, count);
-        return validCards.sort(() => 0.5 - Math.random()).slice(0, count);
+    } else {
+        // CPUの自動選択
+        if (selectableCards.length === 0) return [];
+        return selectableCards.sort(() => 0.5 - Math.random()).slice(0, count);
     }
 
     window.isHandSelecting = true;
-    document.getElementById('time-container').style.zIndex = '10001';
+    const tBot = document.getElementById('time-container-bottom');
+    if (tBot) tBot.style.zIndex = '10001';
 
     return new Promise(resolve => {
         const overlay = document.getElementById('hand-select-overlay');
@@ -447,12 +482,13 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
         let selectedCards = [];
 
         window.autoSelectAndResolve = () => {
-            let selectable = filterType === 'debuff' ? validCards.filter(c => c.type === 'character') : validCards;
-            let autoSelected = selectable.sort(() => 0.5 - Math.random()).slice(0, count);
+            let autoSelected = selectableCards.sort(() => 0.5 - Math.random()).slice(0, count);
             closeHandSelection(overlay, resolve, autoSelected);
         };
 
-        validCards.forEach(card => {
+        // 選択対象外（アクションカードなど）も画面には表示するがグレーアウト
+        nonNullCards.forEach(card => {
+            const isSelectable = selectableCards.includes(card);
             const el = document.createElement('div');
             
             if (targetPlayer === myColor || filterType === 'debuff') {
@@ -466,15 +502,15 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
                 }
                 
                 let costHtml = `<div class="cost-container">${card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
-                
                 el.innerHTML = `<div class="${badgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':card.atk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div>${costHtml}`;
             } else {
                 el.className = card.type === 'character' ? 'hidden-char' : 'hidden-action';
             }
 
-            if (filterType === 'debuff' && card.type === 'action') {
-                el.style.opacity = '0.5';
+            if (!isSelectable) {
+                el.style.opacity = '0.4';
                 el.style.cursor = 'not-allowed';
+                el.style.filter = 'grayscale(80%)';
             } else {
                 el.style.cursor = 'pointer';
                 el.onclick = () => {
@@ -516,13 +552,16 @@ function closeHandSelection(overlay, resolve, selectedCards) {
     overlay.style.display = 'none';
     window.isHandSelecting = false;
     window.autoSelectAndResolve = null;
-    document.getElementById('time-container').style.zIndex = '5';
+    const tBot = document.getElementById('time-container-bottom');
+    if (tBot) tBot.style.zIndex = '5';
     resolve(selectedCards);
 }
 
+// (selectBoardTarget, createCardElementUI, updateHighlightsAndLines は省略せず維持)
 async function selectBoardTarget(validIndices) {
     window.isBoardTargeting = true;
-    document.getElementById('time-container').style.zIndex = '10001';
+    const tBot = document.getElementById('time-container-bottom');
+    if (tBot) tBot.style.zIndex = '10001';
     
     validIndices.forEach(idx => {
         const cell = boardElement.children[idx];
@@ -551,7 +590,7 @@ async function selectBoardTarget(validIndices) {
             document.querySelectorAll('.target-hl').forEach(el => el.remove());
             window.isBoardTargeting = false;
             window.autoResolveBoardTarget = null;
-            document.getElementById('time-container').style.zIndex = '5';
+            if (tBot) tBot.style.zIndex = '5';
             resolve(resultIdx);
         };
 
@@ -738,7 +777,6 @@ async function startMulliganPhase() {
         drawCards(myColor, 4);
         
         if (isOnlineMode) {
-            // お互いが自分のマリガン結果だけをFirebaseに送信する
             const updates = {};
             if (myColor === 'yellow') updates.handYellowJSON = JSON.stringify(handYellow);
             else updates.handPurpleJSON = JSON.stringify(handPurple);
@@ -949,7 +987,6 @@ async function playActionCard(index) {
     if (hpYellow <= 0 || hpPurple <= 0) { checkGameOverAndChangeTurn(); return; }
     
     if (isOnlineMode) pushGameStateToFirebase();
-    if (timeLeft <= 0) autoPlayTimeout();
 }
 
 function getFlippableAndTriggers(index, player) {
@@ -1124,7 +1161,20 @@ async function executeCombat(index, playerColor, finalCard, result) {
         if (sMatch) abilityDamage += parseInt(sMatch[1]);
         if (nMatch) abilityDamage += parseInt(nMatch[1]);
 
-        if (finalCard.id === "0003") activeEffects.push({ player: playerColor, type: 'buff_random', amount: 2, turnsLeft: 3 });
+        // 【修正：レオリオの自分のターン限定の3ターンバフ（置いた時を含む）】
+        if (finalCard.id === "0003") {
+            const hand = playerColor === 'yellow' ? handYellow : handPurple;
+            const chars = hand.filter(c => c && c.type === 'character');
+            if (chars.length > 0) {
+                const target = chars[Math.floor(Math.random() * chars.length)];
+                target.atk += 2;
+                logDisplay.textContent = `⚡[レオリオ]手札を強化！`;
+                renderHands(); 
+                await sleep(300);
+            }
+            activeEffects.push({ player: playerColor, type: 'buff_random', amount: 2, turnsLeft: 2 });
+        }
+
         if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
         
         const hMatch = text.match(/HPを(\d+)回復/);
@@ -1206,7 +1256,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
     return false;
 }
 
-// ====== 盤面への石置きメイン関数（手順の徹底＋AIフリーズ対応） ======
+// ====== 盤面への石置きメイン関数 ======
 async function placeStone(index) {
     if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     const result = getFlippableAndTriggers(index, currentPlayer);
@@ -1218,7 +1268,6 @@ async function placeStone(index) {
 
     window.isBoardSelecting = true;
     
-    // 【手順1】手札からカードを取り除き、UIを更新
     hand[window.selectedHandIndex] = null;
     window.selectedHandIndex = null;
     boardContainer.classList.remove('tilted');
@@ -1233,7 +1282,6 @@ async function placeStone(index) {
         
         let finalCard = { ...selectedCard, color: currentPlayer };
         
-        // コスト不足や条件未達ならバニラ化
         if (costStatus !== 'OK' || !triggerMet) {
             finalCard.combo = null; finalCard.ability = null; result.triggers = [];
             let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
@@ -1242,14 +1290,10 @@ async function placeStone(index) {
             finalCard.atk = Math.max(0, 1 + buffAmount); 
         }
 
-        // 【手順2】まずは盤面にカードを置く（まだめくらない）
         boardData[index] = finalCard;
         renderBoard();
-        
-        // 【手順3】1呼吸おく
         await sleep(500);
 
-        // 【手順4】発動条件を満たしている場合、バフ・デバフ・捨てる対象を選択
         let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
 
         if (costStatus === 'OK' && triggerMet) {
@@ -1272,7 +1316,6 @@ async function placeStone(index) {
             }
         }
 
-        // 【手順5】選択された効果を適用
         const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
         for (let c of discardList) {
             await animateHandCard(c, currentPlayer, 'card-discard-anim');
@@ -1296,11 +1339,10 @@ async function placeStone(index) {
             await sleep(300);
         }
 
-        // 【手順6】いよいよめくって戦闘ダメージを計算
         await executeCombat(index, currentPlayer, finalCard, result);
 
     } catch (error) {
-        console.error("戦闘処理中にエラーが発生しました:", error);
+        console.error("Combat Error:", error);
     } finally {
         window.isBoardSelecting = false;
         
@@ -1310,7 +1352,6 @@ async function placeStone(index) {
             if (hpYellow <= 0 || hpPurple <= 0 || !boardData.some(c => c === null)) {
                 setTimeout(() => alert(`ゲーム終了！`), 100);
             }
-            // 行動したプレイヤーだけが状態を送信し、相手にターンを渡す
             if (currentPlayer === myColor) {
                 pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
             }
@@ -1333,18 +1374,22 @@ function startTurn() {
     window.selectedHandIndex = null; 
     updateBoardPerspective(); 
     
+    // 【修正：レオリオ（buff_random）等のターン管理】
     activeEffects.forEach(effect => {
-        if (effect.player !== currentPlayer) {
-            if (effect.turnsLeft > 0) effect.turnsLeft--;
-        }
-        if (effect.player === currentPlayer && effect.turnsLeft > 0) {
-            if (effect.type === 'buff_random') {
+        if (effect.type === 'buff_random') {
+            // 自分のターン開始時のみ効果発動＆減衰
+            if (effect.player === currentPlayer && effect.turnsLeft > 0) {
                 const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
                 const chars = hand.filter(c => c && c.type === 'character');
                 if (chars.length > 0) {
                     const target = chars[Math.floor(Math.random() * chars.length)];
                     target.atk += effect.amount;
                 }
+                effect.turnsLeft--;
+            }
+        } else {
+            if (effect.player !== currentPlayer && effect.turnsLeft > 0) {
+                effect.turnsLeft--;
             }
         }
     });
@@ -1353,26 +1398,53 @@ function startTurn() {
     document.querySelectorAll('.highlight-box').forEach(el => el.remove()); 
     if (svgGroup) svgGroup.innerHTML = '';
     
-    clearInterval(timerId); timeLeft = 30; timeLeftDisplay.textContent = timeLeft;
+    // 【修正：タイマーUIの分離と制御】
+    clearInterval(timerId); timeLeft = 30; 
     const isMe = currentPlayer === myColor; 
+    
+    const timeTop = document.getElementById('time-container-top');
+    const timeBot = document.getElementById('time-container-bottom');
+    const timeBoxTop = document.getElementById('timer-box-top');
+    const timeBoxBot = document.getElementById('timer-box-bottom');
+
+    if (timeBot && timeTop && timeBoxBot && timeBoxTop) {
+        if (isMe) {
+            timeBot.style.display = 'flex';
+            timeTop.style.display = 'none';
+            timeBoxBot.textContent = timeLeft;
+        } else {
+            timeBot.style.display = 'none';
+            timeTop.style.display = 'flex';
+            timeBoxTop.textContent = timeLeft;
+        }
+    }
+    
     logDisplay.textContent = isMe ? "あなたのターンです" : "相手のターンです..."; 
     renderBoard(); renderHands();
     
     if (!isMe) { 
         if (!isOnlineMode) setTimeout(autoPlayOpponent, 1500); 
-        return; 
+        // 相手ターンの場合、自分のローカルタイマーは「表示のみ」で自動処理は発火させない
     }
 
     timerId = setInterval(async () => { 
-        timeLeft--; timeLeftDisplay.textContent = timeLeft; 
+        timeLeft--; 
+        if (timeBot && timeTop && timeBoxBot && timeBoxTop) {
+            if (isMe) timeBoxBot.textContent = timeLeft;
+            else timeBoxTop.textContent = timeLeft;
+        }
+
         if (timeLeft <= 0) {
             clearInterval(timerId);
-            if (window.isHandSelecting && window.autoSelectAndResolve) {
-                window.autoSelectAndResolve();
-            } else if (window.isBoardTargeting && window.autoResolveBoardTarget) {
-                window.autoResolveBoardTarget();
-            } else if (!window.isBoardSelecting && !actionUsedThisTurn) {
-                autoPlayTimeout(); 
+            // 自分のターンの時だけローカルで勝手に動く処理（AI代理）を実行する
+            if (isMe) { 
+                if (window.isHandSelecting && window.autoSelectAndResolve) {
+                    window.autoSelectAndResolve();
+                } else if (window.isBoardTargeting && window.autoResolveBoardTarget) {
+                    window.autoResolveBoardTarget();
+                } else if (!window.isBoardSelecting && !actionUsedThisTurn) {
+                    autoPlayTimeout(); 
+                }
             }
         }
     }, 1000);
@@ -1392,7 +1464,7 @@ async function autoPlayTimeout() {
                 let move = validMoves[Math.floor(Math.random() * validMoves.length)];
                 window.selectedHandIndex = hand.indexOf(c);
                 window.isBoardSelecting = false; 
-                await placeStone(move); // AIも人間と同じ配置ルートを通る
+                await placeStone(move);
                 return;
             }
         }
@@ -1426,7 +1498,7 @@ async function autoPlayOpponent() {
         const randChar = chars[Math.floor(Math.random() * chars.length)];
         window.selectedHandIndex = hand.indexOf(randChar);
         window.isBoardSelecting = false;
-        await placeStone(validMoves[Math.floor(Math.random() * validMoves.length)]); // AIも人間と同じルートを通る
+        await placeStone(validMoves[Math.floor(Math.random() * validMoves.length)]);
         return;
     }
     
@@ -1463,7 +1535,6 @@ function renderBoard() {
             cell.classList.add('active-buff-glow'); 
         }
         
-        // 人間のターンの場合のみクリックによる盤面配置を許可
         cell.addEventListener('click', () => {
             if (currentPlayer === myColor) placeStone(i);
         });
@@ -1477,7 +1548,10 @@ window.useTimeExtension = function() {
         usedThinkThisTurn = true;
         timeExtendCountMy--;
         document.getElementById(`td-bottom-${3 - timeExtendCountMy}`).classList.add('used');
-        timeLeft += 30; timeLeftDisplay.textContent = timeLeft;
+        timeLeft += 30; 
+        
+        const tb = document.getElementById('timer-box-bottom');
+        if (tb) tb.textContent = timeLeft;
         logDisplay.textContent = `⏳長考(+30秒)を使用！`;
         
         if (isOnlineMode) pushGameStateToFirebase();
