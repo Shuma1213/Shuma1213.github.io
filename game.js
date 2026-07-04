@@ -1,6 +1,7 @@
 // ====== Firebase 初期化設定 ======
 // ※ここに取得したご自身のキーを上書きしてください
-capiKey: "AIzaSyDd2LuXOjqcd30qNM3YZ-5kRxxWFhKvJ_k",
+const firebaseConfig = {
+  apiKey: "AIzaSyDd2LuXOjqcd30qNM3YZ-5kRxxWFhKvJ_k",
   authDomain: "aribato-134a7.firebaseapp.com",
   databaseURL: "https://aribato-134a7-default-rtdb.firebaseio.com",
   projectId: "aribato-134a7",
@@ -8,7 +9,6 @@ capiKey: "AIzaSyDd2LuXOjqcd30qNM3YZ-5kRxxWFhKvJ_k",
   messagingSenderId: "573955770812",
   appId: "1:573955770812:web:db120eddd5accc0f2803b9"
 };
-
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
