@@ -19,7 +19,6 @@ animStyles.innerHTML = `
     .card-discard-anim { transform: translateY(50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-return-anim { transform: translateY(-50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
-    .active-buff-glow { box-shadow: 0 0 10px 3px #f1c40f !important; }
 `;
 document.head.appendChild(animStyles);
 
@@ -89,6 +88,7 @@ function shuffleDeck(deck) {
     }
 }
 
+// ====== モード選択 ======
 window.selectMode = function(mode) {
     isOnlineMode = (mode === 'online');
     if(isOnlineMode) {
@@ -105,6 +105,7 @@ window.selectDeck = function(deckName) {
     startOfflineGame(deckName);
 };
 
+// ====== オフライン用のゲーム開始処理 ======
 window.startOfflineGame = function(selectedDeck) {
     document.getElementById('app-container').style.display = 'flex';
     
@@ -151,6 +152,7 @@ function ensureCharacterInHand(player) {
         deck.push(...nonNulls);
         for(let i=0; i<4; i++) hand[i] = null;
         shuffleDeck(deck);
+        let drawCount = 0;
         for (let i = 0; i < 4; i++) {
             if (deck.length > 0) hand[i] = deck.pop();
         }
@@ -187,12 +189,14 @@ function updateHPUI() {
 const directions = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
 function checkCostStatus(card, playerColor) {
-    if (!card) return 'SHORTAGE';
+    if (!card) return 'SHORTAGE'; // ←【修正】安全対策
     const pGP = playerGP[playerColor].gp;
     const availSpec = pGP[card.group] || 0;
     const totalGP = Object.values(pGP).reduce((sum, val) => sum + val, 0);
-    const specificCost = card.cost?.specific || 0;
+    
+    const specificCost = card.cost?.specific || 0; // ←【修正】オプショナルチェーン
     const freeCost = card.cost?.free || 0;
+    
     if (availSpec >= specificCost && totalGP >= (specificCost + freeCost)) return 'OK';
     return 'SHORTAGE';
 }
@@ -248,42 +252,108 @@ function checkAbilityMet(card, index, flippable, playerColor) {
 async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message, filterType = 'all') {
     const rawHand = targetPlayer === 'yellow' ? handYellow : handPurple;
     let validCards = rawHand.filter(c => c !== null);
+
     if (filterType === 'debuff') {
         const chars = validCards.filter(c => c.type === 'character');
-        if (chars.length === 0) { logDisplay.textContent = '効果対象なし'; await sleep(1000); return []; }
-        validCards = chars;
+        if (chars.length === 0) {
+            logDisplay.textContent = '効果対象なし';
+            await sleep(1000);
+            return [];
+        }
+        if (chars.length === 1 && actingPlayer === myColor) {
+            logDisplay.textContent = `自動選択: ${chars[0].name}`;
+            await sleep(1000);
+            return [chars[0]];
+        }
+        validCards = rawHand.filter(c => c !== null); 
     } else if (filterType === 'character') {
         validCards = validCards.filter(c => c.type === 'character');
     }
+
     if (validCards.length === 0) return [];
     if (filterType !== 'debuff' && validCards.length <= count) return [...validCards];
-    if (actingPlayer !== myColor) return validCards.sort(() => 0.5 - Math.random()).slice(0, count);
+
+    if (actingPlayer !== myColor) {
+        if (filterType === 'debuff') return rawHand.filter(c => c && c.type === 'character').sort(() => 0.5 - Math.random()).slice(0, count);
+        return validCards.sort(() => 0.5 - Math.random()).slice(0, count);
+    }
 
     window.isHandSelecting = true;
     document.getElementById('time-container').style.zIndex = '10001';
+
     return new Promise(resolve => {
         const overlay = document.getElementById('hand-select-overlay');
+        const title = document.getElementById('hand-select-title');
         const grid = document.getElementById('hand-select-grid');
         const okBtn = document.getElementById('hand-select-ok-btn');
-        document.getElementById('hand-select-title').textContent = message;
+
+        title.textContent = message;
         grid.innerHTML = '';
         let selectedCards = [];
-        window.autoSelectAndResolve = () => { closeHandSelection(overlay, resolve, validCards.sort(() => 0.5 - Math.random()).slice(0, count)); };
+
+        window.autoSelectAndResolve = () => {
+            let selectable = filterType === 'debuff' ? validCards.filter(c => c.type === 'character') : validCards;
+            let autoSelected = selectable.sort(() => 0.5 - Math.random()).slice(0, count);
+            closeHandSelection(overlay, resolve, autoSelected);
+        };
+
         validCards.forEach(card => {
             const el = document.createElement('div');
-            el.className = `hand-card card-${card.type}`;
-            el.style.backgroundImage = card.id ? `url('cards/${card.id}.png')` : '';
-            el.innerHTML = `<div class="card-atk-text">${card.type==='action'?'A':card.atk}</div>`;
-            el.onclick = () => {
-                const idx = selectedCards.indexOf(card);
-                if (idx > -1) { selectedCards.splice(idx, 1); el.style.border = ""; } 
-                else if (selectedCards.length < count) { selectedCards.push(card); el.style.border = "3px solid #00d2ff"; }
-                okBtn.style.opacity = selectedCards.length === count ? '1' : '0.5';
-            };
+            
+            if (targetPlayer === myColor || filterType === 'debuff') {
+                el.className = `hand-card card-${card.type}`;
+                if (card.id) el.style.backgroundImage = `url('cards/${card.id}.png')`;
+                
+                let badgeClass = 'card-atk-badge';
+                if (card.original_atk !== undefined) {
+                    if (card.atk > card.original_atk) badgeClass += ' buffed';
+                    if (card.atk < card.original_atk) badgeClass += ' debuffed';
+                }
+                
+                let costHtml = `<div class="cost-container">${card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
+                
+                el.innerHTML = `<div class="${badgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':card.atk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div>${costHtml}`;
+            } else {
+                el.className = card.type === 'character' ? 'hidden-char' : 'hidden-action';
+            }
+
+            if (filterType === 'debuff' && card.type === 'action') {
+                el.style.opacity = '0.5';
+                el.style.cursor = 'not-allowed';
+            } else {
+                el.style.cursor = 'pointer';
+                el.onclick = () => {
+                    const idx = selectedCards.indexOf(card);
+                    if (idx > -1) {
+                        selectedCards.splice(idx, 1);
+                        el.style.border = "";
+                        el.style.boxShadow = "";
+                    } else {
+                        if (count === 1) { 
+                            selectedCards = [card];
+                            Array.from(grid.children).forEach(child => { child.style.border = ""; child.style.boxShadow = ""; });
+                            el.style.border = "3px solid #00d2ff";
+                            el.style.boxShadow = "0 0 15px #00d2ff";
+                        } else if (selectedCards.length < count) {
+                            selectedCards.push(card);
+                            el.style.border = "3px solid #00d2ff";
+                            el.style.boxShadow = "0 0 15px #00d2ff";
+                        }
+                    }
+                    okBtn.style.opacity = selectedCards.length === count ? '1' : '0.5';
+                };
+            }
             grid.appendChild(el);
         });
+
         overlay.style.display = 'flex';
-        okBtn.onclick = () => { if (selectedCards.length === count) closeHandSelection(overlay, resolve, selectedCards); };
+        okBtn.style.display = 'block';
+        okBtn.style.opacity = selectedCards.length === count ? '1' : '0.5';
+
+        okBtn.onclick = () => {
+            if (selectedCards.length < count) return;
+            closeHandSelection(overlay, resolve, selectedCards);
+        };
     });
 }
 
@@ -298,19 +368,29 @@ function closeHandSelection(overlay, resolve, selectedCards) {
 async function selectBoardTarget(validIndices) {
     window.isBoardTargeting = true;
     document.getElementById('time-container').style.zIndex = '10001';
+    
     validIndices.forEach(idx => {
         const cell = boardElement.children[idx];
-        const hl = document.createElement('div'); hl.className = 'highlight-box target-hl';
-        hl.style.cssText = 'border:2px solid #ffd700; cursor:crosshair;';
+        const hl = document.createElement('div');
+        hl.className = 'highlight-box target-hl';
+        hl.style.borderColor = '#ffd700';
+        hl.style.boxShadow = 'inset 0 0 15px #ffd700, 0 0 15px #ffd700';
+        hl.style.zIndex = '20000';
+        hl.style.cursor = 'crosshair';
+        hl.style.pointerEvents = 'auto'; 
         cell.appendChild(hl);
     });
+
     return new Promise(resolve => {
         const clickHandler = (e) => {
             const cell = e.target.closest('.cell');
             if (!cell) return;
             const idx = Array.from(boardElement.children).indexOf(cell);
-            if (validIndices.includes(idx)) cleanup(idx);
+            if (validIndices.includes(idx)) {
+                cleanup(idx);
+            }
         };
+        
         const cleanup = (resultIdx) => {
             boardElement.removeEventListener('click', clickHandler);
             document.querySelectorAll('.target-hl').forEach(el => el.remove());
@@ -319,55 +399,194 @@ async function selectBoardTarget(validIndices) {
             document.getElementById('time-container').style.zIndex = '5';
             resolve(resultIdx);
         };
-        window.autoResolveBoardTarget = () => cleanup(validIndices[0]);
+
+        window.autoResolveBoardTarget = () => {
+            const randomIdx = validIndices[Math.floor(Math.random() * validIndices.length)];
+            cleanup(randomIdx);
+        };
+
         boardElement.addEventListener('click', clickHandler);
     });
 }
 
 function createCardElementUI(card, index, playerColor, isHandCard = true) {
-    if (!card) return document.createElement('div');
-    const el = document.createElement('div');
-    el.className = `hand-card card-${card.type}`;
-    if (card.id) el.style.backgroundImage = `url('cards/${card.id}.png')`;
-    el.innerHTML = `<div class="card-atk-text">${card.type==='action'?'A':card.atk}</div>`;
+    if (!card) {
+        const emptyEl = document.createElement('div');
+        emptyEl.className = 'hand-card empty-slot';
+        emptyEl.style.background = 'rgba(0,0,0,0.1)';
+        emptyEl.style.border = '1px dashed #555';
+        emptyEl.style.pointerEvents = 'none';
+        return emptyEl;
+    }
+    const el = document.createElement('div'); let className = `hand-card card-${card.type}`;
+    const costStatus = checkCostStatus(card, playerColor);
+    
+    if (isHandCard) {
+        if (currentPlayer !== playerColor) {
+            className += ' inactive'; el.style.pointerEvents = 'none';
+        }
+        else if (costStatus !== 'OK') { className += card.type === 'character' ? ' cost-shortage' : ' unplayable'; }
+        if (currentPlayer === playerColor && card.type === 'action' && actionUsedThisTurn) className += ' unplayable';
+    }
+    
+    let atkBadgeClass = 'card-atk-badge';
+    let displayAtk = card.atk;
+    if (card.type === 'character' && card.original_atk !== undefined) {
+        if (card.atk > card.original_atk) atkBadgeClass += ' buffed';
+        else if (card.atk < card.original_atk) atkBadgeClass += ' debuffed';
+    }
+
+    el.className = className; if (card.id) el.style.backgroundImage = `url('cards/${card.id}.png')`;
+    el.innerHTML = `<div class="${atkBadgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':displayAtk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div><div class="cost-container">${card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
     return el;
 }
 
 function updateHighlightsAndLines() {
     document.querySelectorAll('.highlight-box:not(.target-hl)').forEach(el => el.remove());
-    if (svgGroup) svgGroup.innerHTML = '';
+    if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+    
     if (window.selectedHandIndex == null || currentPlayer !== myColor) return;
-    const card = (myColor === 'yellow' ? handYellow : handPurple)[window.selectedHandIndex];
+    
+    const hand = myColor === 'yellow' ? handYellow : handPurple;
+    const card = hand[window.selectedHandIndex];
     if (!card || card.type !== 'character') return;
+
+    const costStatus = checkCostStatus(card, myColor);
+
     for (let i = 0; i < 36; i++) {
-        if (boardData[i] === null && getFlippableAndTriggers(i, myColor).flippable.length > 0) {
-            const hl = document.createElement('div'); hl.className = 'highlight-box';
-            boardElement.children[i].appendChild(hl);
+        if (boardData[i] !== null) continue;
+        const { flippable, triggers } = getFlippableAndTriggers(i, myColor);
+        if (flippable.length === 0) continue;
+
+        const cell = boardElement.children[i];
+        const hl = document.createElement('div');
+        hl.className = 'highlight-box';
+
+        if (costStatus === 'SHORTAGE') {
+            hl.classList.add('hl-gray');
+        } else {
+            const abilityMet = checkAbilityMet(card, i, flippable, myColor);
+            if (abilityMet) hl.classList.add('hl-yellow');
+            else hl.classList.add('hl-blue');
+
+            if (triggers.length > 0 && svgGroup) {
+                const cx = (i % 6) * 52 + 26;
+                const cy = Math.floor(i / 6) * 52 + 26;
+                triggers.forEach(tIdx => {
+                    const targetCard = boardData[tIdx];
+                    if (targetCard && targetCard.type === 'character' && targetCard.combo && targetCard.combo.text) {
+                        const tx = (tIdx % 6) * 52 + 26;
+                        const ty = Math.floor(tIdx / 6) * 52 + 26;
+                        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                        line.setAttribute("x1", cx);
+                        line.setAttribute("y1", cy);
+                        line.setAttribute("x2", tx);
+                        line.setAttribute("y2", ty);
+                        line.setAttribute("stroke", "#ffd700");
+                        line.setAttribute("stroke-width", "3");
+                        line.setAttribute("stroke-dasharray", "8, 4");
+                        line.setAttribute("filter", "url(#glow)");
+                        svgGroup.appendChild(line);
+                    }
+                });
+            }
         }
+        cell.appendChild(hl);
     }
 }
 
 function renderHands() {
     const topArea = document.getElementById('hand-top'); const bottomArea = document.getElementById('hand-bottom');
     topArea.innerHTML = ''; bottomArea.innerHTML = '';
+    
     (myColor === 'yellow' ? handYellow : handPurple).forEach((card, i) => {
+        if (card === null) {
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'hand-card empty-slot';
+            emptyEl.style.background = 'rgba(0,0,0,0.1)';
+            emptyEl.style.border = '1px dashed #555';
+            emptyEl.style.pointerEvents = 'none';
+            bottomArea.appendChild(emptyEl);
+            return;
+        }
         const el = createCardElementUI(card, i, myColor);
-        el.onclick = () => { 
-            if (currentPlayer === myColor) { 
-                window.selectedHandIndex = (window.selectedHandIndex === i) ? null : i; 
-                renderHands(); updateHighlightsAndLines();
-            } 
-        };
-        if (window.selectedHandIndex === i) el.classList.add('selected');
+        if (card.type === 'action' && currentPlayer === myColor && !actionUsedThisTurn) el.onclick = () => playActionCard(i);
+        else if (card.type === 'character') {
+            el.onclick = () => { 
+                if (currentPlayer === myColor && !window.isBoardSelecting && !window.isBoardTargeting) { 
+                    window.selectedHandIndex = (window.selectedHandIndex === i) ? null : i; 
+                    updateBoardPerspective(); 
+                    renderHands(); 
+                    updateHighlightsAndLines();
+                } 
+            };
+        }
+        if (window.selectedHandIndex === i && card.type === 'character') el.classList.add('selected');
         bottomArea.appendChild(el);
     });
+    
+    (opColor === 'yellow' ? handYellow : handPurple).forEach((card, i) => {
+        if (card === null) {
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'hidden-char empty-slot';
+            emptyEl.style.opacity = '0'; 
+            emptyEl.style.pointerEvents = 'none';
+            topArea.appendChild(emptyEl);
+            return;
+        }
+        const el = document.createElement('div');
+        el.className = card.type === 'character' ? 'hidden-char' : 'hidden-action';
+        el.style.position = 'relative'; 
+        
+        if (card.type === 'character' && card.original_atk !== undefined) {
+            let badge = document.createElement('div');
+            badge.className = 'card-atk-badge';
+            badge.style.top = 'auto'; 
+            badge.style.bottom = '-5px';
+            if (card.atk > card.original_atk) badge.classList.add('buffed');
+            else if (card.atk < card.original_atk) badge.classList.add('debuffed');
+            el.appendChild(badge);
+        }
+        topArea.appendChild(el);
+    });
+}
+
+function updateBoardPerspective() {
+    if (currentPlayer === myColor && window.selectedHandIndex != null) {
+        boardContainer.classList.remove('tilted');
+    } else if (currentPlayer === myColor && window.selectedHandIndex == null) {
+         boardContainer.classList.remove('tilted'); 
+    } else {
+        boardContainer.classList.add('tilted'); 
+    }
 }
 
 async function startMulliganPhase() {
     drawCards('yellow', 4); drawCards('purple', 4); updateHPUI();
-    document.getElementById('mulligan-overlay').style.display = 'flex';
+    const overlay = document.getElementById('mulligan-overlay');
+    const mulNodes = [ document.getElementById('mul-top'), document.getElementById('mul-left'), document.getElementById('mul-right'), document.getElementById('mul-bottom') ];
+    let selectedForMulligan = [false, false, false, false];
+    const myHand = myColor === 'yellow' ? handYellow : handPurple;
+    myHand.forEach((card, i) => {
+        const el = createCardElementUI(card, i, myColor, false);
+        el.onclick = () => { selectedForMulligan[i] = !selectedForMulligan[i]; el.classList.toggle('mulligan-selected'); };
+        mulNodes[i].innerHTML = ''; mulNodes[i].appendChild(el);
+    });
+    overlay.style.display = 'flex';
+    
     document.getElementById('mulligan-ok-btn').onclick = () => {
-        document.getElementById('mulligan-overlay').style.display = 'none';
+        overlay.style.display = 'none';
+        let returnedMy = [];
+        for(let i=3; i>=0; i--) {
+            if(selectedForMulligan[i]) {
+                returnedMy.push(myHand[i]);
+                myHand[i] = null;
+            }
+        }
+        const myDeck = myColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        myDeck.push(...returnedMy); 
+        shuffleDeck(myDeck);
+        drawCards(myColor, 4);
         startTurn();
     };
 }
@@ -376,24 +595,198 @@ async function animateHandCard(card, playerColor, animClass) {
     const hand = playerColor === 'yellow' ? handYellow : handPurple;
     const idx = hand.indexOf(card);
     if (idx > -1) {
-        const container = document.getElementById(playerColor === myColor ? 'hand-bottom' : 'hand-top');
-        container.children[idx].classList.add(animClass);
+        const containerId = playerColor === myColor ? 'hand-bottom' : 'hand-top';
+        const el = document.getElementById(containerId).children[idx];
+        if (el) el.classList.add(animClass);
     }
     await sleep(500);
 }
 
+// 完全にオリジナルの playActionCard
 async function playActionCard(index) {
-    if (actionUsedThisTurn || window.isBoardSelecting) return;
+    if (actionUsedThisTurn || window.isBoardSelecting || window.isBoardTargeting) return;
+    
     const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
     const card = hand[index];
+    if (!card) return;
     if (checkCostStatus(card, currentPlayer) !== 'OK') return;
+
+    window.isBoardSelecting = true;
+    const id = card.id;
+    let preSelectedCards = [];
+    
+    if (id === "A199") { 
+        preSelectedCards = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
+    }
+    
     actionUsedThisTurn = true;
+    let discarded = hand[index];
     hand[index] = null;
-    logDisplay.textContent = `アクション発動: ${card.name}`;
+    if (currentPlayer === 'yellow') discardYellow.push(discarded); else discardPurple.push(discarded);
+    logDisplay.textContent = `⚡アクション[${discarded.name}]使用！`; 
     renderHands();
-    await sleep(500);
-    // (各種カード効果処理...省略)
-    checkGameOverAndChangeTurn();
+    await sleep(300);
+
+    if (id === "A043") {
+        const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+        targets.forEach(c => c.atk += 7);
+    }
+    else if (id === "A044") {
+        const chars = hand.filter(c => c && c.type === 'character');
+        const targets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
+        targets.forEach(c => c.atk += 5);
+    }
+    else if (id === "A039") {
+        const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+        targets.forEach(c => c.atk += 3);
+    }
+    else if (id === "A040") {
+        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        const idx = deck.findIndex(c => c && c.group === '287期受験生' && c.type === 'character');
+        if (idx !== -1) {
+            const drawnCard = deck.splice(idx, 1)[0];
+            drawnCard.atk += 5;
+            const emptyIdx = hand.indexOf(null);
+            if (emptyIdx !== -1) hand[emptyIdx] = drawnCard;
+            else deck.push(drawnCard);
+        }
+    }
+    else if (id === "A041") {
+        if (currentPlayer === 'yellow') hpYellow += 7; else hpPurple += 7;
+        await showDamageAnimation(`回復 7`, currentPlayer, 'heal');
+    }
+    else if (id === "A042") {
+        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        deck.filter(c => c && c.type === 'character').forEach(c => c.atk += 2);
+    }
+    else if (id === "A152") {
+        hand.filter(c => c && c.type === 'character').forEach(c => c.atk += 1);
+    }
+    else if (id === "A198") {
+        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        deck.filter(c => c && c.type === 'character').forEach(c => c.atk += 1);
+    }
+    else if (id === "A199") {
+        for (let c of preSelectedCards) {
+            await animateHandCard(c, currentPlayer, 'card-discard-anim');
+            hand[hand.indexOf(c)] = null;
+            if (currentPlayer === 'yellow') discardYellow.push(c); else discardPurple.push(c);
+        }
+    }
+    else if (id === "A158") {
+        drawCards(currentPlayer, 1); 
+    }
+    else if (id === "A087") {
+        await animateGPFly(14, currentPlayer, '幻影旅団');
+        playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
+        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
+        const chars = oppHand.filter(c => c && c.type === 'character');
+        if (chars.length > 0) {
+            const target = chars[Math.floor(Math.random() * chars.length)];
+            target.atk = Math.max(0, target.atk - 4);
+            logDisplay.textContent = `相手の手札のATKを-4!`;
+        }
+    }
+    else if (id === "A082") {
+        const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
+        await animateGPFly(14, currentPlayer, '幻影旅団');
+        playerGP[currentPlayer].gp['幻影旅団'] = beforeGP + 1;
+        if (beforeGP >= 10) {
+            if (currentPlayer === 'yellow') hpYellow += 11; else hpPurple += 11;
+            await showDamageAnimation(`回復 11`, currentPlayer, 'heal');
+        }
+    }
+    else if (id === "A084") {
+        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
+        oppHand.filter(c => c && c.type === 'character').forEach(c => {
+            c.atk = Math.max(0, c.atk - 4);
+        });
+        logDisplay.textContent = `相手の手札すべてのATKを-4!`;
+        renderHands();
+        await sleep(500);
+    }
+    else if (id === "A085") {
+        if (currentPlayer === 'yellow') hpYellow += 10; else hpPurple += 10;
+        await showDamageAnimation(`回復 10`, currentPlayer, 'heal');
+    }
+    else if (id === "A086") {
+        const oppCharIndices = [];
+        boardData.forEach((c, idx) => { if (c && c.type === 'character' && c.color === opColor) oppCharIndices.push(idx); });
+        
+        if (oppCharIndices.length === 0) {
+            logDisplay.textContent = '効果対象なし';
+            await sleep(1000);
+        } else {
+            let targetIdx = -1;
+            if (currentPlayer !== myColor) {
+                targetIdx = oppCharIndices[Math.floor(Math.random() * oppCharIndices.length)];
+            } else {
+                logDisplay.textContent = '空にする相手のキャラを選択してください';
+                targetIdx = await selectBoardTarget(oppCharIndices);
+            }
+            if (targetIdx !== -1) {
+                boardData[targetIdx] = { color: opColor, type: 'stone', name: '' };
+                logDisplay.textContent = 'キャラを空のカードにしました';
+                renderBoard();
+                await sleep(500);
+            }
+        }
+    }
+    else if (id === "A083") {
+        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
+        const validTargets = oppHand.filter(c => c && (c.cost.specific + c.cost.free) <= 3);
+        if (validTargets.length === 0) {
+            logDisplay.textContent = '効果対象なし';
+            await sleep(1000);
+        } else {
+            const target = validTargets[Math.floor(Math.random() * validTargets.length)];
+            await animateHandCard(target, opColor, 'card-discard-anim');
+            oppHand[oppHand.indexOf(target)] = null;
+            if (opColor === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+            logDisplay.textContent = `相手のカードを捨てさせた!`;
+        }
+    }
+    else if (id === "A163") {
+        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) >= 3);
+        if (targetIdx !== -1) {
+            const drawn = deck.splice(targetIdx, 1)[0];
+            const emptyIdx = hand.indexOf(null);
+            if (emptyIdx !== -1) hand[emptyIdx] = drawn;
+            else deck.push(drawn);
+            logDisplay.textContent = 'キャラを引いた!';
+        } else {
+            logDisplay.textContent = '効果対象なし';
+        }
+        await sleep(1000);
+    }
+    else if (id === "A200") {
+        const nonNulls = hand.filter(c => c !== null);
+        if (nonNulls.length > 0) {
+            const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
+            if (targets.length > 0) {
+                const target = targets[0];
+                await animateHandCard(target, currentPlayer, 'card-return-anim');
+                hand[hand.indexOf(target)] = null;
+                const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+                deck.push(target);
+                shuffleDeck(deck);
+            }
+        }
+    }
+    else if (id === "A201") {
+        drawCards(currentPlayer, 1);
+    }
+    
+    updateHPUI(); renderHands(); updateHighlightsAndLines();
+    
+    window.isBoardSelecting = false;
+    
+    if (hpYellow <= 0 || hpPurple <= 0) { checkGameOverAndChangeTurn(); return; }
+    
+    if (timeLeft <= 0) {
+        autoPlayTimeout();
+    }
 }
 
 function getFlippableAndTriggers(index, player) {
@@ -402,12 +795,14 @@ function getFlippableAndTriggers(index, player) {
     const flippable = []; const triggers = []; 
     const cx = index % boardSize; const cy = Math.floor(index / boardSize);
     for (const [dx, dy] of directions) {
-        let x = cx + dx; let y = cy + dy; let temp = [];
+        let x = cx + dx; let y = cy + dy; let tempFlippable = [];
         while (x >= 0 && x < boardSize && y >= 0 && y < boardSize) {
             const tIdx = y * boardSize + x; const tCard = boardData[tIdx];
-            if (tCard && tCard.color === opponent) temp.push(tIdx);
-            else if (tCard && tCard.color === player) { if (temp.length > 0) { flippable.push(...temp); triggers.push(tIdx); } break; }
-            else break;
+            if (tCard && tCard.color === opponent) tempFlippable.push(tIdx);
+            else if (tCard && tCard.color === player) { 
+                if (tempFlippable.length > 0) { flippable.push(...tempFlippable); triggers.push(tIdx); } 
+                break; 
+            } else break;
             x += dx; y += dy;
         }
     }
@@ -415,55 +810,345 @@ function getFlippableAndTriggers(index, player) {
 }
 
 function applyDamageReduction(damage, dmgType, targetPlayer) {
-    return { finalDamage: Math.max(1, damage), reduction: 0 };
+    let totalReduction = 0;
+    
+    activeEffects.forEach(effect => {
+        if (effect.player === targetPlayer && effect.turnsLeft > 0) {
+            if (effect.type === 'reduce_damage_all' || effect.type === 'reduce_damage_normal') {
+                let card = boardData[effect.index];
+                if (card && card.id === effect.cardId && card.color === targetPlayer) {
+                    if (effect.type === 'reduce_damage_all' || (effect.type === 'reduce_damage_normal' && dmgType === 'normal')) {
+                        totalReduction += effect.amount;
+                    }
+                }
+            }
+            if (effect.type === 'reduce_damage_taken' && dmgType === 'normal') {
+                totalReduction += effect.amount;
+            }
+        }
+    });
+
+    let finalDamage = damage - totalReduction;
+    if (damage > 0) {
+        finalDamage = Math.max(1, finalDamage); 
+    } else {
+        finalDamage = 0; 
+    }
+    return { finalDamage, reduction: totalReduction };
+}
+
+async function showDamageAnimation(damageText, targetPlayer, colorClass = 'normal') {
+    const popup = document.createElement('div');
+    popup.className = `damage-popup ${colorClass}`;
+    popup.textContent = damageText;
+    document.getElementById('app-container').appendChild(popup);
+    
+    await sleep(50);
+    popup.classList.add('show');
+    await sleep(600); 
+    
+    popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
+    await sleep(400); 
+    popup.remove();
+}
+
+async function showDamageAnimationReduction(reduction, finalDmg, targetPlayer) {
+    const popup = document.createElement('div');
+    popup.className = `damage-popup reduce`;
+    popup.textContent = `-${reduction}`;
+    document.getElementById('app-container').appendChild(popup);
+
+    await sleep(50);
+    popup.classList.add('show');
+    await sleep(800);
+
+    popup.textContent = finalDmg; 
+    await sleep(600);
+
+    popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
+    await sleep(400);
+    popup.remove();
 }
 
 async function animateGPFly(startIndex, playerColor, group) {
+    let color = '#fff';
+    if (group === 'フリー') color = '#7f8c8d';
+    if (group === '幻影旅団') color = '#8e44ad';
+    if (group === '287期受験生') color = '#2ecc71';
+    if (group === 'マフィアンコミュニティー') color = '#e74c3c';
+    
     const cell = boardElement.children[startIndex];
-    if (!cell) return;
+    if (!cell) return; // ←【修正】安全対策
+    
     const cellRect = cell.getBoundingClientRect();
-    const gpBtn = document.getElementById(playerColor === myColor ? 'gp-btn-bottom' : 'gp-btn-top');
-    if (!gpBtn) return;
+    
+    const gpBtnId = playerColor === myColor ? 'gp-btn-bottom' : 'gp-btn-top'; 
+    const gpBtn = document.getElementById(gpBtnId);
+    if (!gpBtn) return; // ←【修正】安全対策
+    
     const btnRect = gpBtn.getBoundingClientRect();
+    
     const particle = document.createElement('div');
     particle.className = 'gp-fly-particle';
-    particle.style.cssText = `position:fixed; left:${cellRect.left}px; top:${cellRect.top}px; width:20px; height:20px; background:gold;`;
+    particle.style.background = color;
+    particle.style.color = color;
+    particle.style.left = `${cellRect.left + 20}px`;
+    particle.style.top = `${cellRect.top + 20}px`;
     document.body.appendChild(particle);
+
     await sleep(50);
-    particle.style.transition = 'all 0.5s';
-    particle.style.left = `${btnRect.left}px`;
-    particle.style.top = `${btnRect.top}px`;
-    await sleep(500);
+    particle.style.left = `${btnRect.left + 40}px`;
+    particle.style.top = `${btnRect.top + 10}px`;
+    
+    await sleep(600);
     particle.remove();
 }
 
+// 完全にオリジナルの executeCombat
 async function executeCombat(index, playerColor, selectedCard) {
     const result = getFlippableAndTriggers(index, playerColor);
-    boardData[index] = { ...selectedCard, color: playerColor };
-    result.flippable.forEach(idx => boardData[idx].color = playerColor);
+    const costStatus = checkCostStatus(selectedCard, playerColor);
+    const opponentColor = playerColor === 'yellow' ? 'purple' : 'yellow';
+    let triggerMet = checkAbilityMet(selectedCard, index, result.flippable, playerColor);
+    
+    let finalCard = { ...selectedCard, color: playerColor };
+    
+    if (costStatus !== 'OK' || !triggerMet) {
+        finalCard.combo = null; finalCard.ability = null; result.triggers = [];
+        let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
+        let buffAmount = selectedCard.atk - orig;
+        if (isNaN(buffAmount)) buffAmount = 0;
+        finalCard.atk = Math.max(0, 1 + buffAmount); 
+    }
+    
+    boardData[index] = finalCard;
     renderBoard();
-    await animateGPFly(index, playerColor, selectedCard.group);
+    await sleep(500); 
+
+    result.flippable.forEach(idx => {
+        const tc = boardData[idx];
+        if (tc && tc.type === 'character') { 
+            if (tc.color === 'yellow') discardYellow.push(tc); 
+            else discardPurple.push(tc); 
+        }
+        boardData[idx] = { color: playerColor, type: 'stone', name: '' };
+    });
+    renderBoard();
+    await sleep(400);
+    
+    const targetPlayer = playerColor === 'yellow' ? 'purple' : 'yellow';
+
+    let baseAtk = finalCard.atk;
+    let flipBonus = result.flippable.length >= 2 ? (result.flippable.length * 2 - 3) : 0;
+    
+    const popup = document.createElement('div');
+    popup.className = 'damage-popup normal';
+    document.getElementById('app-container').appendChild(popup);
+    
+    await sleep(50);
+    popup.textContent = baseAtk;
+    popup.classList.add('show');
+    await sleep(600);
+
+    let totalNormalDamage = baseAtk;
+    if (flipBonus > 0) {
+        popup.textContent = `${baseAtk} + ${flipBonus}`;
+        await sleep(600);
+        totalNormalDamage = baseAtk + flipBonus;
+        popup.textContent = totalNormalDamage;
+        await sleep(500);
+    }
+
+    let { finalDamage: nFinalDmg, reduction: nRed } = applyDamageReduction(totalNormalDamage, 'normal', targetPlayer);
+    
+    if (nRed > 0) {
+        popup.textContent = `-${nRed}`;
+        popup.className = 'damage-popup reduce show';
+        await sleep(800);
+        popup.textContent = nFinalDmg; 
+        await sleep(600);
+    }
+    
+    popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
+    await sleep(300); 
+    
+    if (playerColor === 'yellow') hpPurple -= nFinalDmg; else hpYellow -= nFinalDmg;
+    updateHPUI();
+    popup.remove();
+    await sleep(200);
+
+    if (hpYellow <= 0 || hpPurple <= 0) return true; 
+
+    let abilityDamage = 0;
+    if (finalCard.ability && finalCard.ability.text && triggerMet) {
+        const text = finalCard.ability.text;
+        const sMatch = text.match(/特殊ダメージを(\d+)/);
+        const nMatch = text.match(/念ダメージを(\d+)/);
+        if (sMatch) abilityDamage += parseInt(sMatch[1]);
+        if (nMatch) abilityDamage += parseInt(nMatch[1]);
+
+        if (finalCard.id === "0003") activeEffects.push({ player: playerColor, type: 'buff_random', amount: 2, turnsLeft: 3 });
+        if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
+        
+        const hMatch = text.match(/HPを(\d+)回復/);
+        if (hMatch && result.flippable.length >= 2) {
+            const heal = parseInt(hMatch[1]);
+            logDisplay.textContent = `⚡能力発動！`;
+            await showDamageAnimation(`回復 ${heal}`, playerColor, 'heal');
+            if (playerColor === 'yellow') hpYellow += heal; else hpPurple += heal;
+            updateHPUI();
+        }
+
+        if (finalCard.id === "0064") {
+            const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
+            oppHand.filter(c => c && c.type === 'character').forEach(c => { c.atk = Math.max(0, c.atk - 3); });
+            logDisplay.textContent = `⚡相手の手札をデバフ！`;
+            renderHands();
+        }
+
+        if (finalCard.id === "0066") {
+            activeEffects.push({ player: playerColor, type: 'reduce_damage_all', amount: 2, turnsLeft: 3, index: index, cardId: finalCard.id });
+        }
+        if (finalCard.id === "0060") {
+            activeEffects.push({ player: playerColor, type: 'reduce_damage_normal', amount: 4, turnsLeft: 4, index: index, cardId: finalCard.id });
+        }
+    }
+    
+    if (abilityDamage > 0) {
+        logDisplay.textContent = `⚡能力発動！`;
+        let { finalDamage: aFinalDmg, reduction: aRed } = applyDamageReduction(abilityDamage, 'special', targetPlayer);
+        if (aRed > 0) {
+            await showDamageAnimationReduction(aRed, aFinalDmg, targetPlayer);
+        } else {
+            await showDamageAnimation(`能力 ${aFinalDmg}`, targetPlayer);
+        }
+        if (playerColor === 'yellow') hpPurple -= aFinalDmg; else hpYellow -= aFinalDmg;
+        updateHPUI();
+        await sleep(200);
+        
+        if (hpYellow <= 0 || hpPurple <= 0) return true;
+    }
+
+    for (let tIdx of result.triggers) {
+        const bCard = boardData[tIdx];
+        if (bCard && bCard.type === 'character' && bCard.combo && bCard.combo.text) {
+            let comboDmg = 0; let comboHeal = 0;
+            const sMatch = bCard.combo.text.match(/特殊ダメージを(\d+)/);
+            const nMatch = bCard.combo.text.match(/念ダメージを(\d+)/);
+            const hMatch = bCard.combo.text.match(/HPを(\d+)回復/);
+            
+            if (sMatch) comboDmg += parseInt(sMatch[1]);
+            if (nMatch) comboDmg += parseInt(nMatch[1]);
+            if (hMatch) comboHeal += parseInt(hMatch[1]);
+
+            if (comboDmg > 0) {
+                logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
+                let { finalDamage: cFinalDmg, reduction: cRed } = applyDamageReduction(comboDmg, 'special', targetPlayer);
+                if (cRed > 0) {
+                    await showDamageAnimationReduction(cRed, cFinalDmg, targetPlayer);
+                } else {
+                    await showDamageAnimation(`コンボ ${cFinalDmg}`, targetPlayer);
+                }
+                if (playerColor === 'yellow') hpPurple -= cFinalDmg; else hpYellow -= cFinalDmg;
+                updateHPUI();
+                await sleep(300);
+                
+                if (hpYellow <= 0 || hpPurple <= 0) return true;
+            }
+            if (comboHeal > 0) {
+                logDisplay.textContent = `🔗[${bCard.name}]コンボ発動！`;
+                await showDamageAnimation(`回復 ${comboHeal}`, playerColor, 'heal');
+                if (playerColor === 'yellow') hpYellow += comboHeal; else hpPurple += comboHeal;
+                updateHPUI();
+                await sleep(300);
+            }
+        }
+    }
+
+    let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
+
+    if (costStatus === 'OK' && triggerMet) {
+        if (finalCard.id === "0004" || finalCard.id === "0010") {
+            discardList = await selectHandCardsTarget(playerColor, playerColor, 1, '捨てるカードを選択してください', 'all');
+        }
+        if (finalCard.id === "0046" || finalCard.id === "0048") {
+            returnList = await selectHandCardsTarget(playerColor, playerColor, 1, 'デッキに戻すカードを選択してください', 'all');
+        }
+        if (finalCard.id === "0070") {
+            debuffList = await selectHandCardsTarget(playerColor, opponentColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
+        }
+        if (finalCard.id === "0002" || finalCard.id === "0031") {
+            buffTargets = await selectHandCardsTarget(playerColor, playerColor, 1, '強化するキャラを選択', 'character');
+        }
+        if (finalCard.id === "0028") {
+            const hand = playerColor === 'yellow' ? handYellow : handPurple;
+            const chars = hand.filter(c => c && c.type === 'character');
+            buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
+        }
+    }
+
+    const activeHand = playerColor === 'yellow' ? handYellow : handPurple;
+    
+    for (let c of discardList) {
+        await animateHandCard(c, playerColor, 'card-discard-anim');
+        activeHand[activeHand.indexOf(c)] = null;
+        if (playerColor === 'yellow') discardYellow.push(c); else discardPurple.push(c);
+    }
+    for (let c of returnList) {
+        await animateHandCard(c, playerColor, 'card-return-anim');
+        activeHand[activeHand.indexOf(c)] = null;
+        const deck = playerColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        deck.push(c); shuffleDeck(deck);
+    }
+    for (let c of debuffList) {
+        c.atk = Math.max(0, c.atk - 10);
+    }
+    for (let c of buffTargets) {
+        if (finalCard.id === "0002") c.atk += 3;
+        if (finalCard.id === "0031" || finalCard.id === "0028") c.atk += 5;
+    }
+
+    if (discardList.length > 0 || returnList.length > 0 || debuffList.length > 0 || buffTargets.length > 0) {
+        renderHands();
+        await sleep(300);
+    }
+
+    await animateGPFly(index, playerColor, finalCard.group);
+    playerGP[playerColor].gp[finalCard.group] = (playerGP[playerColor].gp[finalCard.group] || 0) + 1;
+    
+    if (triggerMet && finalCard.id === "0073") {
+        await animateGPFly(index, playerColor, '幻影旅団');
+        playerGP[playerColor].gp['幻影旅団'] = (playerGP[playerColor].gp['幻影旅団'] || 0) + 1;
+    }
+
+    logDisplay.textContent = ``;
+    renderHands();
+    return false;
 }
 
+// 完全にオリジナルの placeStone に差し替え（＋修正）
 async function placeStone(index) {
     if (currentPlayer !== myColor || window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     if (getFlippableAndTriggers(index, currentPlayer).flippable.length === 0) return;
     
     const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
     const selectedCard = hand[window.selectedHandIndex];
-    if (!selectedCard) return;
+    if (!selectedCard) return; // ←【修正】安全対策
 
     window.isBoardSelecting = true;
+    
     hand[window.selectedHandIndex] = null;
     window.selectedHandIndex = null;
     
+    boardContainer.classList.add('tilted');
     document.querySelectorAll('.highlight-box').forEach(el => el.remove());
-    if (svgGroup) svgGroup.innerHTML = '';
+    if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
 
+    // ←【修正】try...catchブロックでエラー時も進行を止めない
     try {
         await executeCombat(index, currentPlayer, selectedCard);
-    } catch (e) {
-        console.error(e);
+    } catch (error) {
+        console.error("戦闘処理中にエラーが発生しました:", error);
     } finally {
         window.isBoardSelecting = false;
         checkGameOverAndChangeTurn();
@@ -471,24 +1156,210 @@ async function placeStone(index) {
 }
 
 function checkGameOverAndChangeTurn() {
-    window.selectedHandIndex = null;
-    currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow';
-    startTurn();
+    window.selectedHandIndex = null; 
+    clearInterval(timerId); 
+    if (hpYellow <= 0 || hpPurple <= 0 || !boardData.includes(null)) { setTimeout(() => alert(`ゲーム終了！`), 100); return; }
+    currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow'; startTurn();
 }
 
 function startTurn() {
+    actionUsedThisTurn = false; 
+    usedThinkThisTurn = false;
+    window.selectedHandIndex = null; 
+    updateBoardPerspective(); 
+    
+    activeEffects.forEach(effect => {
+        if (effect.player !== currentPlayer) {
+            if (effect.turnsLeft > 0) effect.turnsLeft--;
+        }
+        if (effect.player === currentPlayer && effect.turnsLeft > 0) {
+            if (effect.type === 'buff_random') {
+                const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+                const chars = hand.filter(c => c && c.type === 'character');
+                if (chars.length > 0) {
+                    const target = chars[Math.floor(Math.random() * chars.length)];
+                    target.atk += effect.amount;
+                }
+            }
+        }
+    });
+    
+    drawCards(currentPlayer, 4); updateHPUI();
+    document.querySelectorAll('.highlight-box').forEach(el => el.remove()); 
+    if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+    
+    clearInterval(timerId); timeLeft = 30; timeLeftDisplay.textContent = timeLeft;
+    const isMe = currentPlayer === myColor; 
+    logDisplay.textContent = ""; 
     renderBoard(); renderHands();
+    
+    if (!isMe) { setTimeout(autoPlayOpponent, 1500); return; }
+
+    timerId = setInterval(async () => { 
+        timeLeft--; timeLeftDisplay.textContent = timeLeft; 
+        if (timeLeft <= 0) {
+            clearInterval(timerId);
+            if (window.isHandSelecting && window.autoSelectAndResolve) {
+                window.autoSelectAndResolve();
+            } else if (window.isBoardTargeting && window.autoResolveBoardTarget) {
+                window.autoResolveBoardTarget();
+            } else if (!window.isBoardSelecting && !actionUsedThisTurn) {
+                autoPlayTimeout(); 
+            }
+        }
+    }, 1000);
+}
+
+async function autoPlayTimeout() {
+    logDisplay.textContent = "時間切れ！自動で配置します。";
+    window.isBoardSelecting = true;
+    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+    const chars = hand.filter(c => c && c.type === 'character');
+    if (chars.length > 0) {
+        for(let c of chars) {
+            let validMoves = [];
+            for (let i = 0; i < 36; i++) if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
+            if (validMoves.length > 0) {
+                let move = validMoves[Math.floor(Math.random() * validMoves.length)];
+                boardContainer.classList.add('tilted');
+                document.querySelectorAll('.highlight-box').forEach(el => el.remove()); 
+                if (svgGroup) svgGroup.innerHTML = ''; // ←【修正】安全対策
+                
+                let discarded = hand[hand.indexOf(c)];
+                hand[hand.indexOf(c)] = null;
+                
+                // ←【修正】try...catch
+                try {
+                    await executeCombat(move, currentPlayer, discarded);
+                } catch (error) {
+                    console.error("時間切れ処理中の戦闘エラー:", error);
+                }
+                
+                window.isBoardSelecting = false;
+                setTimeout(checkGameOverAndChangeTurn, 1000); return;
+            }
+        }
+    }
+    logDisplay.textContent = "配置可能キャラなし！パスします。";
+    window.isBoardSelecting = false;
+    setTimeout(checkGameOverAndChangeTurn, 1000);
+}
+
+// 完全にオリジナルの autoPlayOpponent
+async function autoPlayOpponent() {
+    const hand = opColor === 'yellow' ? handYellow : handPurple;
+    
+    const validActions = hand.filter(c => c && c.type === 'action' && checkCostStatus(c, opColor) === 'OK');
+    if (!actionUsedThisTurn && validActions.length > 0 && Math.random() > 0.5) {
+        const actionCard = validActions[Math.floor(Math.random() * validActions.length)];
+        const index = hand.indexOf(actionCard);
+        await playActionCard(index); 
+        await sleep(1000);
+    }
+
+    window.isBoardSelecting = true;
+    const validMoves = [];
+    for (let i = 0; i < 36; i++) if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) validMoves.push(i);
+    const chars = hand.filter(c => c && c.type === 'character');
+    if (validMoves.length > 0 && chars.length > 0) {
+        const randChar = chars[Math.floor(Math.random() * chars.length)];
+        let discarded = hand[hand.indexOf(randChar)];
+        hand[hand.indexOf(randChar)] = null;
+        
+        // ←【修正】try...catch
+        try {
+            await executeCombat(validMoves[Math.floor(Math.random() * validMoves.length)], currentPlayer, discarded);
+        } catch (error) {
+            console.error("オートプレイ中にエラーが発生しました:", error);
+        }
+    }
+    window.isBoardSelecting = false;
+    checkGameOverAndChangeTurn();
 }
 
 function renderBoard() {
     boardElement.innerHTML = '';
     for (let i = 0; i < 36; i++) {
-        const cell = document.createElement('div'); cell.className = 'cell';
-        if (boardData[i]) {
-            const stone = document.createElement('div'); stone.className = `stone ${boardData[i].color}`;
-            cell.appendChild(stone);
+        const cell = document.createElement('div'); cell.classList.add('cell');
+        
+        let hasGlow = false;
+        for(let effect of activeEffects) {
+            if (effect.turnsLeft > 0 && (effect.type === 'reduce_damage_all' || effect.type === 'reduce_damage_normal')) {
+                const checkCard = boardData[effect.index];
+                if (checkCard && checkCard.id === effect.cardId && checkCard.color === effect.player && i === effect.index) {
+                    hasGlow = true;
+                }
+            }
         }
-        cell.onclick = () => placeStone(i);
-        boardElement.appendChild(cell);
+
+        if (boardData[i] !== null) {
+            const stone = document.createElement('div'); stone.classList.add('stone', boardData[i].color);
+            if (boardData[i].type === 'stone') stone.classList.add('card-stone');
+            else { 
+                stone.classList.add(`card-${boardData[i].type}`); 
+                if (boardData[i].id) stone.style.backgroundImage = `url('cards/${boardData[i].id}.png')`; 
+                stone.innerHTML = `<div class="card-name card-text-node">${boardData[i].name || ''}</div>`; 
+            }
+            if(hasGlow) stone.classList.add('active-buff-glow');
+            cell.appendChild(stone);
+        } else if (hasGlow) {
+            cell.classList.add('active-buff-glow'); 
+        }
+        
+        cell.addEventListener('click', () => placeStone(i)); boardElement.appendChild(cell);
     }
+    updateHighlightsAndLines();
 }
+
+window.useTimeExtension = function() {
+    if (currentPlayer === myColor && !usedThinkThisTurn && timeExtendCountMy > 0 && timerId !== null) {
+        usedThinkThisTurn = true;
+        timeExtendCountMy--;
+        document.getElementById(`td-bottom-${3 - timeExtendCountMy}`).classList.add('used');
+        timeLeft += 30; timeLeftDisplay.textContent = timeLeft;
+        logDisplay.textContent = `⏳長考(+30秒)を使用！`;
+    }
+};
+
+window.toggleGPPool = function(playerCol) {
+    const isTop = playerCol === opColor;
+    const panelId = isTop ? 'gp-pool-top' : 'gp-pool-bottom';
+    const listId = isTop ? 'gp-list-top' : 'gp-list-bottom';
+    const footerId = isTop ? 'gp-footer-top' : 'gp-footer-bottom';
+    
+    const panel = document.getElementById(panelId);
+    if (panel.style.display === 'flex') { panel.style.display = 'none'; return; }
+
+    const poolGP = playerGP[playerCol].gp;
+    const listContainer = document.getElementById(listId);
+    listContainer.innerHTML = '';
+    
+    const allGroups = Object.keys(poolGP);
+    if(!allGroups.includes('フリー')) allGroups.unshift('フリー');
+
+    allGroups.forEach(group => {
+        let color = '#fff'; let icon = 'G';
+        if (group === 'フリー') { color = '#7f8c8d'; icon = 'F'; }
+        if (group === '幻影旅団') { color = '#8e44ad'; icon = '🕷'; }
+        if (group === '287期受験生') { color = '#2ecc71'; icon = '試'; }
+        if (group === 'マフィアンコミュニティー') { color = '#e74c3c'; icon = 'M'; }
+        
+        let amt = poolGP[group] || 0;
+        let diamondsHtml = ''; for(let i=0; i<amt; i++) diamondsHtml += `<div class="gp-pool-diamond" style="background:${color}"></div>`;
+        
+        listContainer.innerHTML += `
+            <div class="gp-item-row">
+                <div class="gp-icon-circle" style="border-color:${color}; color:${color}">${icon}</div>
+                <div class="gp-amt" style="color:${color}">${amt}</div>
+                <div class="gp-diamonds">${diamondsHtml}</div>
+            </div>`;
+    });
+    
+    const deckLen = playerCol === 'yellow' ? masterDecks.yellow.length : masterDecks.purple.length;
+    const discard = playerCol === 'yellow' ? discardYellow : discardPurple;
+    const dChar = discard.filter(c => c && c.type === 'character').length;
+    const dAct = discard.filter(c => c && c.type === 'action').length;
+    
+    document.getElementById(footerId).textContent = `残りデッキ ${deckLen}枚 / 捨て場 C:${dChar} A:${dAct}`;
+    panel.style.display = 'flex';
+};
