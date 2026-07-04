@@ -1,13 +1,47 @@
-body { font-family: sans-serif; background-color: #0d0d12; color: #fff; margin: 0; padding: 0; user-select: none; touch-action: none; overflow: hidden; display: flex; justify-content: center; }
+body { 
+    font-family: sans-serif; 
+    background-color: #0d0d12; 
+    color: #fff; 
+    margin: 0; 
+    padding: 0; 
+    user-select: none; 
+    touch-action: none; 
+    overflow: hidden; 
+    display: flex; 
+    justify-content: center; 
+    height: 100dvh; /* スマホ特有のバーを考慮した正確な高さ */
+    width: 100vw;
+}
 
-#app-container { width: 100%; max-width: 440px; height: 100vh; position: relative; display: flex; flex-direction: column; align-items: center; overflow: hidden; box-sizing: border-box; padding-top: 10px; }
+#app-container { 
+    width: 100%; 
+    max-width: 440px; 
+    height: 100dvh; /* ここも100dvhに変更 */
+    position: relative; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    justify-content: space-between; /* 上下中央に要素を分散させる */
+    overflow: hidden; 
+    box-sizing: border-box; 
+    padding: 10px 0; 
+}
 
 #deck-select-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; display: flex; justify-content: center; align-items: center; }
 .deck-select-modal { background: #1a1a2e; border: 2px solid #00d2ff; border-radius: 10px; padding: 20px; text-align: center; width: 300px; box-shadow: 0 0 20px rgba(0,210,255,0.5); }
 .deck-select-modal h2 { font-size: 18px; margin-bottom: 20px; letter-spacing: 1px; color: #fff; text-shadow: 0 0 5px #00d2ff;}
 .deck-btn { display: block; width: 100%; padding: 15px; margin-bottom: 15px; font-size: 16px; font-weight: bold; background: linear-gradient(to bottom, #0088cc, #002244); border: 1px solid #00d2ff; color: #fff; border-radius: 8px; cursor: pointer; text-shadow: 0 0 3px #00d2ff; }
 
-#board-perspective-wrapper { perspective: 900px; margin: auto 0; width: 100%; display: flex; justify-content: center; }
+#board-perspective-wrapper { 
+    perspective: 900px; 
+    margin: auto 0; 
+    width: 100%; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    flex: 1; /* 空きスペースを埋めるように調整 */
+}
+
 #board-container { position: relative; width: 312px; height: 312px; transition: transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1); transform-origin: bottom center; }
 #board-container.tilted { transform: rotateX(35deg) translateY(-10px) scale(0.95); box-shadow: 0 25px 35px rgba(0,0,0,0.7); }
 
@@ -86,10 +120,8 @@ body { font-family: sans-serif; background-color: #0d0d12; color: #fff; margin: 
 .card-rank { position: absolute; left: 8px; top: 15px; color: #ff9800; font-size: 9px; font-style: italic; }
 .card-atk-badge { position: absolute; top: -5px; left: 50%; transform: translateX(-50%) rotate(45deg); width: 14px; height: 14px; background-color: #00bcd4; border: 1px solid #fff; z-index: 4; }
 .card-atk-badge.buffed { box-shadow: 0 0 6px 2px #ff9800; border-color: #ff9800; }
-/* デバフの光り方の修正（バッジの中身は青のまま、周りのみ紫） */
 .card-atk-badge.debuffed { box-shadow: 0 0 6px 2px #9c27b0; border-color: #9c27b0; background-color: #00bcd4; }
 
-/* マリガン用の六角形ボタン調整（必要に応じて追加） */
 #mulligan-ok-btn { margin-top: 15px; transform: scale(1.3); cursor: pointer; }
 .card-atk-text { position: absolute; top: -4px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #fff; z-index: 5; }
 .cost-container { position: absolute; top: 2px; left: 2px; display: flex; flex-direction: column; gap: 2px; z-index: 6; }
@@ -124,12 +156,19 @@ body { font-family: sans-serif; background-color: #0d0d12; color: #fff; margin: 
 #mul-right { grid-column: 3; grid-row: 2; } #mul-bottom { grid-column: 2; grid-row: 3; }
 .mulligan-selected { border: 3px solid #00d2ff !important; box-shadow: 0 0 20px 5px rgba(0, 210, 255, 0.8) !important; transform: scale(1.05); }
 
-/* 手札の空き枠（使用後）の表現 */
 .empty-slot { background: rgba(0,0,0,0.1) !important; border: 1px dashed #555 !important; box-shadow: none !important; cursor: default !important; pointer-events: none; }
-.hidden-char.empty-slot, .hidden-action.empty-slot { opacity: 0; } /* 相手の空き枠は見えなくする */
-
-/* 相手の手札のバッジ（自分から見て下側に配置） */
+.hidden-char.empty-slot, .hidden-action.empty-slot { opacity: 0; }
 .opponent-badge { top: auto !important; bottom: -5px !important; }
-
-/* 盤面対象選択時のハイライト */
 .target-hl { z-index: 20000 !important; cursor: crosshair; box-shadow: 0 0 15px 5px #ffd700; border: 3px solid #ffd700; }
+
+/* スマホ用の縮尺調整（画面が縦に短い場合は要素全体を少し縮小する） */
+@media (max-height: 750px) {
+    #board-perspective-wrapper { transform: scale(0.88); }
+    .hand-wrapper { height: 75px; margin-bottom: 2px; }
+    .hand-card { width: 58px; height: 58px; }
+}
+
+@media (max-height: 650px) {
+    #board-perspective-wrapper { transform: scale(0.80); }
+    .hand-wrapper { height: 65px; margin-bottom: 0px; }
+}
