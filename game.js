@@ -32,7 +32,7 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
-    /* ====== 立ち絵（スタンディ）演出用CSS ====== */
+    /* ====== 立ち絵演出用CSS ====== */
     .stone-standee { 
         position: absolute; 
         bottom: 20%; 
@@ -49,7 +49,6 @@ animStyles.innerHTML = `
         pointer-events: none; 
         filter: drop-shadow(0 5px 5px rgba(0,0,0,0.5));
     }
-    /* 盤面が斜め（rotateX(35deg)）になった際、逆方向に回してカメラに正対させる */
     #board-container.tilted .stone-standee { 
         opacity: 1; 
         transform: rotateX(-35deg) translateY(-10px) scale(1.1); 
@@ -101,6 +100,10 @@ let myDeckChoice = "";
 let isOnlineMode = false;
 let isGameOver = false;
 
+// 連続対戦時の非同期バグ防止用ID
+let currentMatchId = 0; 
+let consecutivePasses = 0; // お互い置けなくなった場合の引き分け用
+
 let myColor, opColor, currentPlayer;
 let boardData = new Array(36).fill(null);
 let hpYellow = 120; let hpPurple = 120;
@@ -130,15 +133,17 @@ let lastGpFlyTs = 0;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// ====== ゲーム状態の完全リセット（通信の切断含む） ======
+// ====== ゲーム状態の完全リセット ======
 function resetGameState() {
-    // 古い部屋の監視リスナーを完全に切断する
+    currentMatchId++; // マッチIDを更新して過去の非同期処理を無効化
+    
     if (currentRoomId) {
         db.ref('rooms/' + currentRoomId).off();
         currentRoomId = null;
     }
     
     isGameOver = false;
+    consecutivePasses = 0;
     boardData = new Array(36).fill(null);
     hpYellow = 120; hpPurple = 120;
     timeLeft = 30;
@@ -153,19 +158,17 @@ function resetGameState() {
     masterDecks = {}; activeEffects = []; 
     timeExtendCountMy = 3; window.opTimeExtend = 3;
     
-    // UIクリーンアップ
     msgOverlay.classList.remove('show');
     document.querySelectorAll('.damage-popup').forEach(e => e.remove());
     document.querySelectorAll('.gp-fly-particle').forEach(e => e.remove());
     document.querySelectorAll('.stone').forEach(e => e.classList.remove('fade-out-stone'));
     boardElement.innerHTML = '';
-    svgGroup.innerHTML = '';
+    if (svgGroup) svgGroup.innerHTML = '';
     document.getElementById('hand-top').innerHTML = '';
     document.getElementById('hand-bottom').innerHTML = '';
     updateHPUI();
 }
 
-// ====== デッキビルド・シャッフル ======
 function getCardById(idStr) {
     const card = CARD_DATABASE.find(c => c.id === idStr);
     return card ? JSON.parse(JSON.stringify({ ...card, original_atk: card.atk })) : null;
@@ -206,9 +209,6 @@ window.selectDeck = function(deckName) {
     }
 };
 
-// ==========================================
-// オンライン対戦：ルーム管理機能
-// ==========================================
 window.createRoom = function() {
     resetGameState();
     document.getElementById('room-select-overlay').style.display = 'none';
@@ -281,7 +281,6 @@ window.joinRoom = function() {
     });
 };
 
-// ====== 確実なFirebase同期関数 ======
 function pushGameStateToFirebase(nextPlayer = null) {
     if (!isOnlineMode || isGameOver || !currentRoomId) return;
     const syncData = {
@@ -351,7 +350,6 @@ function initOnlineGame() {
         renderBoard();
         renderHands();
 
-        // 相手からのアニメーションイベント再生
         if (data.damageAnim && data.damageAnim.ts !== lastDamageAnimTs) {
             lastDamageAnimTs = data.damageAnim.ts;
             if (currentPlayer !== myColor) showDamageAnimation(data.damageAnim.damageText, data.damageAnim.targetPlayer, data.damageAnim.colorClass, false);
@@ -436,7 +434,6 @@ function ensureCharacterInHand(player) {
         deck.push(...nonNulls);
         for(let i=0; i<4; i++) hand[i] = null;
         shuffleDeck(deck);
-        let drawCount = 0;
         for (let i = 0; i < 4; i++) {
             if (deck.length > 0) hand[i] = deck.pop();
         }
@@ -531,7 +528,7 @@ function checkAbilityMet(card, index, flippable, playerColor) {
     return met;
 }
 
-// ====== 対象選択UI ======
+// ====== 対象選択UI（タイマー停止なし＆時間切れ自動解決） ======
 async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message, filterType = 'all') {
     const rawHand = targetPlayer === 'yellow' ? handYellow : handPurple;
     const nonNullCards = rawHand.filter(c => c !== null);
@@ -827,16 +824,26 @@ function renderHands() {
 }
 
 function updateBoardPerspective() {
-    // 自分のターンで「何も持っていない状態（選択中ではない）」のみ平らにする
-    if (currentPlayer === myColor && window.selectedHandIndex == null && !window.isBoardSelecting) {
+    // 自分ターンで、かつ盤面への配置が確定していない状態（平ら）
+    if (currentPlayer === myColor && !window.isBoardSelecting) {
         boardContainer.classList.remove('tilted');
     } else {
         boardContainer.classList.add('tilted'); 
     }
 }
 
+function hasValidMoves(player) {
+    for (let i = 0; i < 36; i++) {
+        if (getFlippableAndTriggers(i, player).flippable.length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ====== マリガン画面処理 ======
 async function startMulliganPhase() {
+    const matchId = currentMatchId;
     drawCards('yellow', 4); drawCards('purple', 4); updateHPUI();
     const overlay = document.getElementById('mulligan-overlay');
     const mulNodes = [ document.getElementById('mul-top'), document.getElementById('mul-left'), document.getElementById('mul-right'), document.getElementById('mul-bottom') ];
@@ -862,6 +869,7 @@ async function startMulliganPhase() {
     overlay.style.display = 'flex';
     
     const finalizeMulligan = () => {
+        if (matchId !== currentMatchId) return;
         overlay.style.display = 'none';
         let returnedMy = [];
         for(let i=3; i>=0; i--) {
@@ -889,11 +897,12 @@ async function startMulliganPhase() {
     };
 
     let mulInterval = setInterval(() => {
+        if (matchId !== currentMatchId) { clearInterval(mulInterval); return; }
         mulliganTimeLeft--;
         mulTimerBox.textContent = `残り時間: ${mulliganTimeLeft}秒`;
         if (mulliganTimeLeft <= 0) {
             clearInterval(mulInterval);
-            selectedForMulligan = [false, false, false, false];
+            selectedForMulligan = [false, false, false, false]; // タイムアウト時は交換なし
             finalizeMulligan();
         }
     }, 1000);
@@ -934,6 +943,7 @@ async function endOfTurnEffects() {
     }
     if (effectTriggered) {
         renderHands();
+        if (isOnlineMode) pushGameStateToFirebase();
         await sleep(500);
     }
     activeEffects = activeEffects.filter(e => e.turnsLeft > 0);
@@ -949,7 +959,6 @@ async function playActionCard(index) {
     if (checkCostStatus(card, currentPlayer) !== 'OK') return;
 
     window.isBoardSelecting = true;
-
     const id = card.id;
     let preSelectedCards = [];
     
@@ -963,6 +972,7 @@ async function playActionCard(index) {
     if (currentPlayer === 'yellow') discardYellow.push(discarded); else discardPurple.push(discarded);
     logDisplay.textContent = `⚡アクション[${discarded.name}]使用！`; 
     renderHands();
+    if (isOnlineMode) pushGameStateToFirebase();
     await sleep(300);
 
     if (id === "A043") {
@@ -1119,8 +1129,11 @@ async function playActionCard(index) {
     updateHPUI(); renderHands(); updateHighlightsAndLines();
     window.isBoardSelecting = false;
     
-    if (hpYellow <= 0 || hpPurple <= 0) { await handleGameOver(); return; }
-    
+    if (hpYellow <= 0 || hpPurple <= 0) { 
+        if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
+        await handleGameOver(); 
+        return; 
+    }
     if (isOnlineMode) pushGameStateToFirebase();
 }
 
@@ -1179,6 +1192,7 @@ async function showDamageAnimation(damageText, targetPlayer, colorClass = 'norma
     popup.classList.add('show');
     await sleep(600); 
     
+    // 相手へのダメージは上に飛ぶ、自分へのダメージは下に飛ぶ
     popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
     await sleep(400); 
     popup.remove();
@@ -1395,6 +1409,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
 
 // ====== ゲームオーバー処理 ======
 async function handleGameOver() {
+    if (isGameOver) return;
     isGameOver = true;
     if (timerId) clearInterval(timerId);
     
@@ -1421,9 +1436,9 @@ async function handleGameOver() {
     if (winner === 'draw') {
         resultMsg = "DRAW"; resultClass = "msg-finish";
     } else if (winner === myColor) {
-        resultMsg = "YOU WIN"; resultClass = "msg-win-yellow"; // 勝利は必ず黄色
+        resultMsg = "YOU WIN"; resultClass = "msg-win-yellow";
     } else {
-        resultMsg = "YOU LOSE"; resultClass = "msg-lose-purple"; // 敗北は必ず紫色
+        resultMsg = "YOU LOSE"; resultClass = "msg-lose-purple";
     }
 
     showCenterMessage(resultMsg, resultClass, 0); 
@@ -1437,8 +1452,10 @@ async function handleGameOver() {
 function checkGameOverAndChangeTurn() {
     window.selectedHandIndex = null; 
     if (timerId) clearInterval(timerId); 
-    if (hpYellow <= 0 || hpPurple <= 0 || !boardData.includes(null)) { handleGameOver(); return; }
-    
+    if (hpYellow <= 0 || hpPurple <= 0 || !boardData.includes(null)) { 
+        handleGameOver(); 
+        return; 
+    }
     currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow'; 
     startTurn();
 }
@@ -1455,13 +1472,14 @@ async function placeStone(index) {
 
     window.isBoardSelecting = true;
     
+    // 【修正】キャラカードを盤面に置いた時点ではじめて盤面が斜めになる
     hand[window.selectedHandIndex] = null;
     window.selectedHandIndex = null;
     boardContainer.classList.add('tilted');
     document.querySelectorAll('.highlight-box').forEach(el => el.remove());
     if (svgGroup) svgGroup.innerHTML = '';
     
-    // 配置を相手に即時同期
+    // 相手に即時同期
     boardData[index] = { ...selectedCard, color: currentPlayer };
     renderBoard();
     renderHands();
@@ -1491,7 +1509,7 @@ async function placeStone(index) {
 
         let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
 
-        // 効果対象選択フェーズ（タイマーは裏で動き続けている）
+        // 効果対象選択フェーズ
         if (costStatus === 'OK' && triggerMet) {
             if (finalCard.id === "0004" || finalCard.id === "0010") {
                 discardList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
@@ -1524,7 +1542,6 @@ async function placeStone(index) {
             }
         }
 
-        // 戦闘（めくり・ダメージ等）処理を先に実行
         const isGameOverCombat = await executeCombat(index, currentPlayer, finalCard, result);
         if (isGameOverCombat) {
             if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
@@ -1533,7 +1550,6 @@ async function placeStone(index) {
             return;
         }
 
-        // 手札の更新・演出フェーズ（戦闘終了後）
         const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
         let handsChanged = false;
 
@@ -1608,7 +1624,6 @@ function startTurnTimer() {
             if (timeBoxTop) timeBoxTop.textContent = "0";
             clearInterval(timerId);
             
-            // 選択画面中であっても時間切れなら強制的に自動解決して次へ進む
             if (isMe) {
                 if (window.isHandSelecting && window.autoSelectAndResolve) {
                     window.autoSelectAndResolve();
@@ -1632,18 +1647,52 @@ function startTurn() {
     document.querySelectorAll('.highlight-box').forEach(el => el.remove()); 
     if (svgGroup) svgGroup.innerHTML = '';
     
+    const isMe = currentPlayer === myColor; 
+    
+    // 【追加】お互いに置けるマスがない場合のパスとゲーム終了処理
+    if (!hasValidMoves(currentPlayer)) {
+        consecutivePasses++;
+        if (consecutivePasses >= 2) {
+            handleGameOver();
+            return;
+        }
+        
+        logDisplay.textContent = isMe ? "置けるマスがありません（ターンパス）" : "相手はパスしました";
+        window.isBoardSelecting = true; 
+        showCenterMessage("PASS", "msg-turn", 1500);
+        
+        const matchId = currentMatchId;
+        setTimeout(() => {
+            if (matchId !== currentMatchId) return;
+            endOfTurnEffects().then(() => {
+                if (matchId !== currentMatchId) return;
+                if (isOnlineMode) {
+                    if (isMe) pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
+                } else {
+                    checkGameOverAndChangeTurn();
+                }
+            });
+        }, 2000);
+        return; 
+    } else {
+        consecutivePasses = 0;
+    }
+
     timeLeft = 30; 
     startTurnTimer();
     
-    const isMe = currentPlayer === myColor; 
     logDisplay.textContent = ""; 
-    
     showCenterMessage(isMe ? "YOUR TURN" : "ENEMY'S TURN", "msg-turn", 1000);
 
     renderBoard(); renderHands();
     
     if (!isMe) { 
-        if (!isOnlineMode) setTimeout(autoPlayOpponent, 2500); 
+        if (!isOnlineMode) {
+            const matchId = currentMatchId;
+            setTimeout(() => {
+                if (matchId === currentMatchId) autoPlayOpponent();
+            }, 2500); 
+        }
     }
 }
 
@@ -1666,6 +1715,7 @@ async function autoPlayTimeout() {
             }
         }
     }
+    
     logDisplay.textContent = "配置可能キャラなし！パスします。";
     window.isBoardSelecting = false;
     await endOfTurnEffects();
@@ -1673,7 +1723,10 @@ async function autoPlayTimeout() {
     if (isOnlineMode) {
         pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
     } else {
-        setTimeout(checkGameOverAndChangeTurn, 1000);
+        const matchId = currentMatchId;
+        setTimeout(() => {
+            if (matchId === currentMatchId) checkGameOverAndChangeTurn();
+        }, 1000);
     }
 }
 
@@ -1730,11 +1783,9 @@ function renderBoard() {
             if(hasGlow) stone.classList.add('active-buff-glow');
             cell.appendChild(stone);
 
-            // 【追加】盤面が斜めの時だけ浮かび上がるキャラクタースタンディ
             if (boardData[i].type === 'character') {
                 const standee = document.createElement('div');
                 standee.className = 'stone-standee';
-                // 画像がない間はキャラ名プレートを浮かばせる
                 standee.innerHTML = `<div style="background:rgba(0,0,0,0.6); color:#fff; border:1px solid #fff; border-radius:3px; padding:2px; font-size:8px; white-space:nowrap;">${boardData[i].name}</div>`;
                 cell.appendChild(standee);
             }
