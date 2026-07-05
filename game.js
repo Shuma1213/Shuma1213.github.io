@@ -31,6 +31,29 @@ animStyles.innerHTML = `
     .msg-finish { font-style: italic; font-size: 48px; color: #ffeb3b; text-shadow: 0 0 20px #ff9800; }
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
+
+    /* ====== 立ち絵（スタンディ）演出用CSS ====== */
+    .stone-standee { 
+        position: absolute; 
+        bottom: 20%; 
+        width: 100%; 
+        height: 140%; 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: flex-end; 
+        align-items: center; 
+        opacity: 0; 
+        transform-origin: bottom center; 
+        transition: all 0.3s ease; 
+        z-index: 10; 
+        pointer-events: none; 
+        filter: drop-shadow(0 5px 5px rgba(0,0,0,0.5));
+    }
+    /* 盤面が斜め（rotateX(35deg)）になった際、逆方向に回してカメラに正対させる */
+    #board-container.tilted .stone-standee { 
+        opacity: 1; 
+        transform: rotateX(-35deg) translateY(-10px) scale(1.1); 
+    }
 `;
 document.head.appendChild(animStyles);
 
@@ -107,8 +130,15 @@ let lastGpFlyTs = 0;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// ====== ゲーム状態の完全リセット ======
+// ====== ゲーム状態の完全リセット（通信の切断含む） ======
 function resetGameState() {
+    // 古い部屋の監視リスナーを完全に切断する
+    if (currentRoomId) {
+        db.ref('rooms/' + currentRoomId).off();
+        currentRoomId = null;
+    }
+    
+    isGameOver = false;
     boardData = new Array(36).fill(null);
     hpYellow = 120; hpPurple = 120;
     timeLeft = 30;
@@ -122,13 +152,17 @@ function resetGameState() {
     handYellow = [null, null, null, null]; handPurple = [null, null, null, null];
     masterDecks = {}; activeEffects = []; 
     timeExtendCountMy = 3; window.opTimeExtend = 3;
-    isGameOver = false;
     
     // UIクリーンアップ
     msgOverlay.classList.remove('show');
     document.querySelectorAll('.damage-popup').forEach(e => e.remove());
     document.querySelectorAll('.gp-fly-particle').forEach(e => e.remove());
     document.querySelectorAll('.stone').forEach(e => e.classList.remove('fade-out-stone'));
+    boardElement.innerHTML = '';
+    svgGroup.innerHTML = '';
+    document.getElementById('hand-top').innerHTML = '';
+    document.getElementById('hand-bottom').innerHTML = '';
+    updateHPUI();
 }
 
 // ====== デッキビルド・シャッフル ======
@@ -249,7 +283,7 @@ window.joinRoom = function() {
 
 // ====== 確実なFirebase同期関数 ======
 function pushGameStateToFirebase(nextPlayer = null) {
-    if (!isOnlineMode || isGameOver) return;
+    if (!isOnlineMode || isGameOver || !currentRoomId) return;
     const syncData = {
         hpYellow: hpYellow,
         hpPurple: hpPurple,
@@ -497,7 +531,7 @@ function checkAbilityMet(card, index, flippable, playerColor) {
     return met;
 }
 
-// ====== 対象選択UI（タイマー停止なし＆時間切れ自動解決） ======
+// ====== 対象選択UI ======
 async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message, filterType = 'all') {
     const rawHand = targetPlayer === 'yellow' ? handYellow : handPurple;
     const nonNullCards = rawHand.filter(c => c !== null);
@@ -793,10 +827,9 @@ function renderHands() {
 }
 
 function updateBoardPerspective() {
-    if (currentPlayer === myColor && window.selectedHandIndex != null) {
+    // 自分のターンで「何も持っていない状態（選択中ではない）」のみ平らにする
+    if (currentPlayer === myColor && window.selectedHandIndex == null && !window.isBoardSelecting) {
         boardContainer.classList.remove('tilted');
-    } else if (currentPlayer === myColor && window.selectedHandIndex == null) {
-         boardContainer.classList.remove('tilted'); 
     } else {
         boardContainer.classList.add('tilted'); 
     }
@@ -916,7 +949,7 @@ async function playActionCard(index) {
     if (checkCostStatus(card, currentPlayer) !== 'OK') return;
 
     window.isBoardSelecting = true;
-    
+
     const id = card.id;
     let preSelectedCards = [];
     
@@ -1087,6 +1120,7 @@ async function playActionCard(index) {
     window.isBoardSelecting = false;
     
     if (hpYellow <= 0 || hpPurple <= 0) { await handleGameOver(); return; }
+    
     if (isOnlineMode) pushGameStateToFirebase();
 }
 
@@ -1145,7 +1179,6 @@ async function showDamageAnimation(damageText, targetPlayer, colorClass = 'norma
     popup.classList.add('show');
     await sleep(600); 
     
-    // 受ける側を基準にアニメーションの向きを逆転
     popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
     await sleep(400); 
     popup.remove();
@@ -1273,7 +1306,9 @@ async function executeCombat(index, playerColor, finalCard, result) {
         if (sMatch) abilityDamage += parseInt(sMatch[1]);
         if (nMatch) abilityDamage += parseInt(nMatch[1]);
 
-        if (finalCard.id === "0003") activeEffects.push({ player: playerColor, type: 'leorio_buff', amount: 2, turnsLeft: 3 });
+        if (finalCard.id === "0003") {
+            activeEffects.push({ player: playerColor, type: 'leorio_buff', amount: 2, turnsLeft: 3 });
+        }
         if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
         
         const hMatch = text.match(/HPを(\d+)回復/);
@@ -1375,7 +1410,6 @@ async function handleGameOver() {
 
     await showCenterMessage("FINISH!", "msg-finish", 1000);
 
-    // 負けた側のコマを1秒かけて消去
     if (winner === 'yellow') {
         document.querySelectorAll('.stone.purple').forEach(el => el.classList.add('fade-out-stone'));
     } else if (winner === 'purple') {
@@ -1387,15 +1421,14 @@ async function handleGameOver() {
     if (winner === 'draw') {
         resultMsg = "DRAW"; resultClass = "msg-finish";
     } else if (winner === myColor) {
-        resultMsg = "YOU WIN"; resultClass = "msg-win-yellow"; // WINは必ず黄色
+        resultMsg = "YOU WIN"; resultClass = "msg-win-yellow"; // 勝利は必ず黄色
     } else {
-        resultMsg = "YOU LOSE"; resultClass = "msg-lose-purple"; // LOSEは必ず紫色
+        resultMsg = "YOU LOSE"; resultClass = "msg-lose-purple"; // 敗北は必ず紫色
     }
 
     showCenterMessage(resultMsg, resultClass, 0); 
     await sleep(3000);
     
-    // タイトルに戻る
     msgOverlay.classList.remove('show');
     document.getElementById('app-container').style.display = 'none';
     document.getElementById('mode-select-overlay').style.display = 'flex';
@@ -1424,7 +1457,7 @@ async function placeStone(index) {
     
     hand[window.selectedHandIndex] = null;
     window.selectedHandIndex = null;
-    boardContainer.classList.remove('tilted');
+    boardContainer.classList.add('tilted');
     document.querySelectorAll('.highlight-box').forEach(el => el.remove());
     if (svgGroup) svgGroup.innerHTML = '';
     
@@ -1500,7 +1533,7 @@ async function placeStone(index) {
             return;
         }
 
-        // 手札の更新・演出フェーズ（戻す効果以外、戦闘終了後）
+        // 手札の更新・演出フェーズ（戦闘終了後）
         const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
         let handsChanged = false;
 
@@ -1696,6 +1729,16 @@ function renderBoard() {
             }
             if(hasGlow) stone.classList.add('active-buff-glow');
             cell.appendChild(stone);
+
+            // 【追加】盤面が斜めの時だけ浮かび上がるキャラクタースタンディ
+            if (boardData[i].type === 'character') {
+                const standee = document.createElement('div');
+                standee.className = 'stone-standee';
+                // 画像がない間はキャラ名プレートを浮かばせる
+                standee.innerHTML = `<div style="background:rgba(0,0,0,0.6); color:#fff; border:1px solid #fff; border-radius:3px; padding:2px; font-size:8px; white-space:nowrap;">${boardData[i].name}</div>`;
+                cell.appendChild(standee);
+            }
+
         } else if (hasGlow) {
             cell.classList.add('active-buff-glow'); 
         }
