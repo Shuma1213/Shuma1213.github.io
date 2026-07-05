@@ -30,8 +30,6 @@ animStyles.innerHTML = `
     .msg-turn { font-size: 36px; font-style: italic; text-shadow: 0 0 15px #00d2ff; }
     .msg-finish { font-style: italic; font-size: 48px; color: #ffeb3b; text-shadow: 0 0 20px #ff9800; }
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
-    .msg-win-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; }
-    .msg-lose-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; filter: grayscale(100%); }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 `;
 document.head.appendChild(animStyles);
@@ -103,7 +101,35 @@ let activeEffects = [];
 let timeExtendCountMy = 3; 
 window.opTimeExtend = 3; 
 
+let lastDamageAnimTs = 0;
+let lastDamageRedTs = 0;
+let lastGpFlyTs = 0;
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// ====== ゲーム状態の完全リセット ======
+function resetGameState() {
+    boardData = new Array(36).fill(null);
+    hpYellow = 120; hpPurple = 120;
+    timeLeft = 30;
+    if (timerId) clearInterval(timerId);
+    timerId = null;
+    actionUsedThisTurn = false; usedThinkThisTurn = false;
+    window.isBoardSelecting = false; window.isHandSelecting = false;
+    window.autoSelectAndResolve = null; window.isBoardTargeting = false; window.autoResolveBoardTarget = null;
+    playerGP = { yellow: { gp: {} }, purple: { gp: {} } };
+    discardYellow = []; discardPurple = [];
+    handYellow = [null, null, null, null]; handPurple = [null, null, null, null];
+    masterDecks = {}; activeEffects = []; 
+    timeExtendCountMy = 3; window.opTimeExtend = 3;
+    isGameOver = false;
+    
+    // UIクリーンアップ
+    msgOverlay.classList.remove('show');
+    document.querySelectorAll('.damage-popup').forEach(e => e.remove());
+    document.querySelectorAll('.gp-fly-particle').forEach(e => e.remove());
+    document.querySelectorAll('.stone').forEach(e => e.classList.remove('fade-out-stone'));
+}
 
 // ====== デッキビルド・シャッフル ======
 function getCardById(idStr) {
@@ -150,6 +176,7 @@ window.selectDeck = function(deckName) {
 // オンライン対戦：ルーム管理機能
 // ==========================================
 window.createRoom = function() {
+    resetGameState();
     document.getElementById('room-select-overlay').style.display = 'none';
     const roomId = Math.floor(1000 + Math.random() * 9000).toString();
     currentRoomId = roomId;
@@ -186,6 +213,7 @@ window.createRoom = function() {
 };
 
 window.joinRoom = function() {
+    resetGameState();
     const roomId = document.getElementById('room-id-input').value.trim();
     if (!roomId) { alert("ルームIDを入力してください"); return; }
 
@@ -240,7 +268,6 @@ function pushGameStateToFirebase(nextPlayer = null) {
 }
 
 function initOnlineGame() {
-    isGameOver = false;
     const botBadge = document.getElementById('turn-badge-bottom');
     const topBadge = document.getElementById('turn-badge-top');
     botBadge.textContent = isHost ? '先攻' : '後攻';
@@ -248,14 +275,9 @@ function initOnlineGame() {
     botBadge.className = 'turn-badge ' + (isHost ? 'badge-yellow' : 'badge-purple');
     topBadge.className = 'turn-badge ' + (isHost ? 'badge-purple' : 'badge-yellow');
     
-    playerGP = { yellow: { gp: {} }, purple: { gp: {} } };
-    playerGP['purple'].gp['フリー'] = 1; 
+    playerGP[opColor].gp['フリー'] = 1; 
     currentPlayer = 'yellow';
-    timeExtendCountMy = 3;
-    window.opTimeExtend = 3;
-    activeEffects = [];
     
-    boardData = new Array(36).fill(null);
     boardData[15] = { color: 'yellow', type: 'stone', name: '' };
     boardData[20] = { color: 'yellow', type: 'stone', name: '' };
     boardData[14] = { color: 'purple', type: 'stone', name: '' };
@@ -291,12 +313,24 @@ function initOnlineGame() {
             window.opTimeExtend = opCount;
         }
 
-        // 先にUIを更新して、相手側にも0になったHPや最後の盤面を見せる
         updateHPUI();
         renderBoard();
         renderHands();
+
+        // 相手からのアニメーションイベント再生
+        if (data.damageAnim && data.damageAnim.ts !== lastDamageAnimTs) {
+            lastDamageAnimTs = data.damageAnim.ts;
+            if (currentPlayer !== myColor) showDamageAnimation(data.damageAnim.damageText, data.damageAnim.targetPlayer, data.damageAnim.colorClass, false);
+        }
+        if (data.damageRedAnim && data.damageRedAnim.ts !== lastDamageRedTs) {
+            lastDamageRedTs = data.damageRedAnim.ts;
+            if (currentPlayer !== myColor) showDamageAnimationReduction(data.damageRedAnim.reduction, data.damageRedAnim.finalDmg, data.damageRedAnim.targetPlayer, false);
+        }
+        if (data.gpFlyAnim && data.gpFlyAnim.ts !== lastGpFlyTs) {
+            lastGpFlyTs = data.gpFlyAnim.ts;
+            if (currentPlayer !== myColor) animateGPFly(data.gpFlyAnim.startIndex, data.gpFlyAnim.playerColor, data.gpFlyAnim.group, false);
+        }
         
-        // 勝敗がついたことを検知した場合、強制的にゲームオーバー処理を実行する
         if ((hpYellow <= 0 || hpPurple <= 0) && !isGameOver) {
             handleGameOver();
             return;
@@ -325,7 +359,7 @@ function initOnlineGame() {
 }
 
 window.startOfflineGame = function(selectedDeck) {
-    isGameOver = false;
+    resetGameState();
     document.getElementById('app-container').style.display = 'flex';
     document.getElementById('app-container').appendChild(msgOverlay);
     
@@ -348,14 +382,9 @@ window.startOfflineGame = function(selectedDeck) {
         purple: myColor === 'purple' ? buildFixedDeck(selectedDeck) : buildFixedDeck(oppDeck)
     };
     
-    playerGP = { yellow: { gp: {} }, purple: { gp: {} } };
     playerGP[isYouFirst ? opColor : myColor].gp['フリー'] = 1;
     currentPlayer = 'yellow';
-    timeExtendCountMy = 3;
-    window.opTimeExtend = 3;
-    activeEffects = [];
     
-    boardData = new Array(36).fill(null);
     boardData[15] = { color: 'yellow', type: 'stone', name: '' };
     boardData[20] = { color: 'yellow', type: 'stone', name: '' };
     boardData[14] = { color: 'purple', type: 'stone', name: '' };
@@ -468,7 +497,7 @@ function checkAbilityMet(card, index, flippable, playerColor) {
     return met;
 }
 
-// ====== 対象選択UI ======
+// ====== 対象選択UI（タイマー停止なし＆時間切れ自動解決） ======
 async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message, filterType = 'all') {
     const rawHand = targetPlayer === 'yellow' ? handYellow : handPurple;
     const nonNullCards = rawHand.filter(c => c !== null);
@@ -682,7 +711,7 @@ function updateHighlightsAndLines() {
         hl.className = 'highlight-box';
 
         if (costStatus === 'SHORTAGE') {
-            hl.classList.add('hl-gray');
+            hl.classList.add('hl-gray'); 
         } else {
             const abilityMet = checkAbilityMet(card, i, flippable, myColor);
             if (abilityMet) hl.classList.add('hl-yellow'); 
@@ -853,7 +882,7 @@ async function animateHandCard(card, playerColor, animClass) {
     await sleep(500);
 }
 
-// ====== レオリオ等、ターン終了時のバフ処理 ======
+// ====== ターン終了時のバフ処理 ======
 async function endOfTurnEffects() {
     let effectTriggered = false;
     for (let i = 0; i < activeEffects.length; i++) {
@@ -887,8 +916,7 @@ async function playActionCard(index) {
     if (checkCostStatus(card, currentPlayer) !== 'OK') return;
 
     window.isBoardSelecting = true;
-    clearInterval(timerId); 
-
+    
     const id = card.id;
     let preSelectedCards = [];
     
@@ -1058,14 +1086,8 @@ async function playActionCard(index) {
     updateHPUI(); renderHands(); updateHighlightsAndLines();
     window.isBoardSelecting = false;
     
-    if (hpYellow <= 0 || hpPurple <= 0) {
-        if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
-        await handleGameOver(); 
-        return; 
-    }
-    
+    if (hpYellow <= 0 || hpPurple <= 0) { await handleGameOver(); return; }
     if (isOnlineMode) pushGameStateToFirebase();
-    startTurnTimer();
 }
 
 function getFlippableAndTriggers(index, player) {
@@ -1110,7 +1132,10 @@ function applyDamageReduction(damage, dmgType, targetPlayer) {
     return { finalDamage: Math.max(damage > 0 ? 1 : 0, finalDamage), reduction: totalReduction };
 }
 
-async function showDamageAnimation(damageText, targetPlayer, colorClass = 'normal') {
+async function showDamageAnimation(damageText, targetPlayer, colorClass = 'normal', broadcast = true) {
+    if (isOnlineMode && broadcast && currentPlayer === myColor) {
+        db.ref('rooms/' + currentRoomId).update({ damageAnim: { damageText, targetPlayer, colorClass, ts: Date.now() } });
+    }
     const popup = document.createElement('div');
     popup.className = `damage-popup ${colorClass}`;
     popup.textContent = damageText;
@@ -1120,12 +1145,16 @@ async function showDamageAnimation(damageText, targetPlayer, colorClass = 'norma
     popup.classList.add('show');
     await sleep(600); 
     
+    // 受ける側を基準にアニメーションの向きを逆転
     popup.classList.add(targetPlayer === opColor ? 'fly-top' : 'fly-bottom');
     await sleep(400); 
     popup.remove();
 }
 
-async function showDamageAnimationReduction(reduction, finalDmg, targetPlayer) {
+async function showDamageAnimationReduction(reduction, finalDmg, targetPlayer, broadcast = true) {
+    if (isOnlineMode && broadcast && currentPlayer === myColor) {
+        db.ref('rooms/' + currentRoomId).update({ damageRedAnim: { reduction, finalDmg, targetPlayer, ts: Date.now() } });
+    }
     const popup = document.createElement('div');
     popup.className = `damage-popup reduce`;
     popup.textContent = `-${reduction}`;
@@ -1143,7 +1172,10 @@ async function showDamageAnimationReduction(reduction, finalDmg, targetPlayer) {
     popup.remove();
 }
 
-async function animateGPFly(startIndex, playerColor, group) {
+async function animateGPFly(startIndex, playerColor, group, broadcast = true) {
+    if (isOnlineMode && broadcast && currentPlayer === myColor) {
+        db.ref('rooms/' + currentRoomId).update({ gpFlyAnim: { startIndex, playerColor, group, ts: Date.now() } });
+    }
     let color = '#fff';
     if (group === 'フリー') color = '#7f8c8d';
     if (group === '幻影旅団') color = '#8e44ad';
@@ -1188,6 +1220,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
         boardData[idx] = { color: playerColor, type: 'stone', name: '' };
     });
     renderBoard();
+    if (isOnlineMode) pushGameStateToFirebase();
     await sleep(400);
     
     let baseAtk = finalCard.atk;
@@ -1225,6 +1258,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
     
     if (playerColor === 'yellow') hpPurple -= nFinalDmg; else hpYellow -= nFinalDmg;
     updateHPUI();
+    if (isOnlineMode) pushGameStateToFirebase();
     popup.remove();
     await sleep(200);
 
@@ -1239,10 +1273,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
         if (sMatch) abilityDamage += parseInt(sMatch[1]);
         if (nMatch) abilityDamage += parseInt(nMatch[1]);
 
-        if (finalCard.id === "0003") {
-            // レオリオ: activeEffectsに登録し、自分のターン最後でのみ発動（計3回）
-            activeEffects.push({ player: playerColor, type: 'leorio_buff', amount: 2, turnsLeft: 3 });
-        }
+        if (finalCard.id === "0003") activeEffects.push({ player: playerColor, type: 'leorio_buff', amount: 2, turnsLeft: 3 });
         if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
         
         const hMatch = text.match(/HPを(\d+)回復/);
@@ -1252,6 +1283,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
             await showDamageAnimation(`回復 ${heal}`, playerColor, 'heal');
             if (playerColor === 'yellow') hpYellow += heal; else hpPurple += heal;
             updateHPUI();
+            if (isOnlineMode) pushGameStateToFirebase();
         }
 
         if (finalCard.id === "0064") {
@@ -1273,6 +1305,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
         
         if (playerColor === 'yellow') hpPurple -= aFinalDmg; else hpYellow -= aFinalDmg;
         updateHPUI();
+        if (isOnlineMode) pushGameStateToFirebase();
         await sleep(200);
         if (hpYellow <= 0 || hpPurple <= 0) return true;
     }
@@ -1298,6 +1331,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
                 
                 if (playerColor === 'yellow') hpPurple -= cFinalDmg; else hpYellow -= cFinalDmg;
                 updateHPUI();
+                if (isOnlineMode) pushGameStateToFirebase();
                 await sleep(300);
                 if (hpYellow <= 0 || hpPurple <= 0) return true;
             }
@@ -1306,6 +1340,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
                 await showDamageAnimation(`回復 ${comboHeal}`, playerColor, 'heal');
                 if (playerColor === 'yellow') hpYellow += comboHeal; else hpPurple += comboHeal;
                 updateHPUI();
+                if (isOnlineMode) pushGameStateToFirebase();
                 await sleep(300);
             }
         }
@@ -1326,7 +1361,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
 // ====== ゲームオーバー処理 ======
 async function handleGameOver() {
     isGameOver = true;
-    clearInterval(timerId);
+    if (timerId) clearInterval(timerId);
     
     let winner = null;
     if (hpYellow <= 0 && hpPurple <= 0) winner = 'draw';
@@ -1338,10 +1373,9 @@ async function handleGameOver() {
         else winner = 'draw';
     }
 
-    // 1秒間 FINISH! を表示して消す
     await showCenterMessage("FINISH!", "msg-finish", 1000);
 
-    // 負けた側のコマを消去（1秒かけて消える）
+    // 負けた側のコマを1秒かけて消去
     if (winner === 'yellow') {
         document.querySelectorAll('.stone.purple').forEach(el => el.classList.add('fade-out-stone'));
     } else if (winner === 'purple') {
@@ -1350,12 +1384,12 @@ async function handleGameOver() {
     await sleep(1000);
 
     let resultMsg = ""; let resultClass = "";
-    if (winner === myColor) {
-        resultMsg = "YOU WIN"; resultClass = myColor === 'yellow' ? "msg-win-yellow" : "msg-win-purple";
-    } else if (winner === 'draw') {
+    if (winner === 'draw') {
         resultMsg = "DRAW"; resultClass = "msg-finish";
+    } else if (winner === myColor) {
+        resultMsg = "YOU WIN"; resultClass = "msg-win-yellow"; // WINは必ず黄色
     } else {
-        resultMsg = "YOU LOSE"; resultClass = myColor === 'yellow' ? "msg-lose-yellow" : "msg-lose-purple";
+        resultMsg = "YOU LOSE"; resultClass = "msg-lose-purple"; // LOSEは必ず紫色
     }
 
     showCenterMessage(resultMsg, resultClass, 0); 
@@ -1369,7 +1403,7 @@ async function handleGameOver() {
 
 function checkGameOverAndChangeTurn() {
     window.selectedHandIndex = null; 
-    clearInterval(timerId); 
+    if (timerId) clearInterval(timerId); 
     if (hpYellow <= 0 || hpPurple <= 0 || !boardData.includes(null)) { handleGameOver(); return; }
     
     currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow'; 
@@ -1387,14 +1421,18 @@ async function placeStone(index) {
     if (!selectedCard) return;
 
     window.isBoardSelecting = true;
-    clearInterval(timerId); // 時間切れ防止のために即時ストップ
     
     hand[window.selectedHandIndex] = null;
     window.selectedHandIndex = null;
     boardContainer.classList.remove('tilted');
     document.querySelectorAll('.highlight-box').forEach(el => el.remove());
     if (svgGroup) svgGroup.innerHTML = '';
+    
+    // 配置を相手に即時同期
+    boardData[index] = { ...selectedCard, color: currentPlayer };
+    renderBoard();
     renderHands();
+    if (isOnlineMode) pushGameStateToFirebase();
 
     try {
         const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
@@ -1403,7 +1441,6 @@ async function placeStone(index) {
         
         let finalCard = { ...selectedCard, color: currentPlayer };
         
-        // 灰色（コスト不足）：能力なし、コンボなし、ATK1化
         if (costStatus !== 'OK') {
             finalCard.combo = null; 
             finalCard.ability = null; 
@@ -1413,24 +1450,20 @@ async function placeStone(index) {
             if (isNaN(buffAmount)) buffAmount = 0;
             finalCard.atk = Math.max(0, 1 + buffAmount); 
         } else if (!triggerMet) {
-            // 青色（コスト達成・能力条件未達）：能力のみなし（ATKとコンボは通常通り）
             finalCard.ability = null;
         }
 
         boardData[index] = finalCard;
-        renderBoard();
-        if (isOnlineMode) pushGameStateToFirebase(currentPlayer); // 置いた位置を相手に通知
         await sleep(500);
 
         let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
 
-        // 効果対象選択フェーズ（コストも条件も満たしている場合のみ）
+        // 効果対象選択フェーズ（タイマーは裏で動き続けている）
         if (costStatus === 'OK' && triggerMet) {
             if (finalCard.id === "0004" || finalCard.id === "0010") {
                 discardList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
             }
             if (finalCard.id === "0046" || finalCard.id === "0048") {
-                // デッキに戻すカードは「選択直後」に実行
                 returnList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
                 const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
                 for (let c of returnList) {
@@ -1486,6 +1519,7 @@ async function placeStone(index) {
 
         if (handsChanged) {
             renderHands();
+            if (isOnlineMode) pushGameStateToFirebase();
             await sleep(300);
         }
 
@@ -1513,7 +1547,7 @@ async function placeStone(index) {
 
 // ====== タイマー管理機能 ======
 function startTurnTimer() {
-    clearInterval(timerId); 
+    if (timerId) clearInterval(timerId); 
     const isMe = currentPlayer === myColor; 
     
     const timeTop = document.getElementById('time-container-top');
@@ -1522,26 +1556,26 @@ function startTurnTimer() {
     const timeBoxBot = document.getElementById('timer-box-bottom');
 
     if (timeBot && timeTop && timeBoxBot && timeBoxTop) {
-        if (isMe) {
-            timeBot.style.display = 'flex';
-            timeTop.style.display = 'none';
-            timeBoxBot.textContent = timeLeft;
-        } else {
-            timeBot.style.display = 'none';
-            timeTop.style.display = 'flex';
-            timeBoxTop.textContent = timeLeft;
-        }
+        timeBot.style.display = isMe ? 'flex' : 'none';
+        timeTop.style.display = !isMe ? 'flex' : 'none';
+        timeBoxBot.textContent = timeLeft;
+        timeBoxTop.textContent = timeLeft;
     }
 
     timerId = setInterval(async () => { 
         timeLeft--; 
-        if (timeBot && timeTop && timeBoxBot && timeBoxTop) {
-            if (isMe) timeBoxBot.textContent = timeLeft;
-            else timeBoxTop.textContent = timeLeft;
+        if (timeBoxBot && timeBoxTop) {
+            timeBoxBot.textContent = timeLeft;
+            timeBoxTop.textContent = timeLeft;
         }
 
         if (timeLeft <= 0) {
+            timeLeft = 0;
+            if (timeBoxBot) timeBoxBot.textContent = "0";
+            if (timeBoxTop) timeBoxTop.textContent = "0";
             clearInterval(timerId);
+            
+            // 選択画面中であっても時間切れなら強制的に自動解決して次へ進む
             if (isMe) {
                 if (window.isHandSelecting && window.autoSelectAndResolve) {
                     window.autoSelectAndResolve();
@@ -1675,6 +1709,7 @@ function renderBoard() {
 }
 
 window.useTimeExtension = function() {
+    if (timeLeft <= 0) return; // 制限時間切れの長考は無効化
     if (currentPlayer === myColor && !usedThinkThisTurn && timeExtendCountMy > 0 && timerId !== null) {
         usedThinkThisTurn = true;
         timeExtendCountMy--;
