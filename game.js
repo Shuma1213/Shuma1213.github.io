@@ -23,7 +23,8 @@ animStyles.innerHTML = `
     .fade-out-stone { opacity: 0 !important; transform: scale(0) !important; transition: all 1s ease-in-out !important; }
     .fade-out-stone .stone-standee { opacity: 0 !important; transition: opacity 1s ease-in-out !important; }
 
-    #time-container-bottom { position: absolute; left: 15px; bottom: 125px; }
+    /* ====== 1枚目画像：タイマー位置の修正 ====== */
+    #time-container-bottom { position: absolute; left: 15px; bottom: 175px; } /* 手札に被らない高さへ移動 */
     #time-container-top { position: absolute; right: 15px; top: 110px; border-color: #a843ff; box-shadow: 0 0 10px rgba(168,67,255,0.3); flex-direction: column; align-items: center; background: rgba(0,0,0,0.7); padding: 4px 10px; clip-path: polygon(20% 0, 80% 0, 100% 25%, 100% 75%, 80% 100%, 20% 100%, 0 75%, 0 25%); z-index: 5; }
     
     .center-message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: bold; color: white; z-index: 30000; pointer-events: none; opacity: 0; transition: opacity 0.2s; text-align: center; width: 100%; letter-spacing: 2px; }
@@ -33,13 +34,13 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
-    /* ====== 立ち絵（スタンディ）の大型化 ====== */
+    /* ====== 3枚目画像：立ち絵演出の理想化 ====== */
     .stone-standee { 
         position: absolute; 
-        bottom: 5%; 
-        left: -30%;
+        bottom: 0%; /* コマの底面を基準にする */
+        left: -30%; /* はみ出す幅の分だけ中央に寄せる */
         width: 160%; 
-        height: 200%; 
+        height: 180%; /* コマの上部に大きく飛び出すサイズ */
         display: flex; 
         flex-direction: column; 
         justify-content: flex-end; 
@@ -49,56 +50,114 @@ animStyles.innerHTML = `
         z-index: 10; 
         pointer-events: none; 
         filter: drop-shadow(0 5px 5px rgba(0,0,0,0.6));
+        /* ここには rotateX を加えず、盤面の傾きにそのまま乗せる */
     }
     #board-container.tilted .stone-standee { 
         opacity: 1; 
-        transform: rotateX(-35deg) translateY(-25px) scale(1.3); 
-        transform-origin: bottom center;
     }
 
-    /* ====== 手札カードの大型化とUI調整 ====== */
-    .hand-card {
-        width: 85px !important;
-        height: 85px !important;
-        border: 3px solid #ccc;
+    /* ====== 2枚目画像：手札カードのUIデザイン改修 ====== */
+    .hand-card { 
+        border-radius: 50% !important; /* カードを円形に */
+        border: 2px solid #aaa !important; 
+        background-color: #222 !important;
+        width: 75px !important;
+        height: 75px !important;
     }
-    .hand-card.card-action {
-        border-radius: 0;
-        border: 2px solid #a843ff;
+    .hand-card.card-action { 
+        border-radius: 10px !important; 
+        clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%) !important; 
+        border-color: #a843ff !important;
     }
-    .card-atk-text {
-        font-size: 20px !important;
-        top: 2px !important;
-        left: 8px !important;
-        transform: none !important;
-        text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 8px #000 !important;
+    
+    /* ATKのひし形とテキスト */
+    .card-atk-badge { 
+        position: absolute; 
+        top: -8px !important; 
+        left: 50% !important; 
+        transform: translateX(-50%) rotate(45deg) !important; 
+        width: 22px !important; 
+        height: 22px !important; 
+        background: linear-gradient(135deg, #00d2ff, #0055ff) !important; 
+        border: 1px solid #fff !important; 
+        z-index: 4 !important; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }
-    .cost-container {
-        top: -5px !important;
-        left: auto !important;
-        right: -5px !important;
-        flex-direction: row !important;
+    .card-atk-badge.debuffed { background: linear-gradient(135deg, #9c27b0, #4b0082) !important; }
+    .card-atk-badge.buffed { background: linear-gradient(135deg, #ff9800, #ff5722) !important; }
+    
+    .card-atk-text { 
+        position: absolute; 
+        top: -6px !important; 
+        left: 50% !important; 
+        transform: translateX(-50%) !important; 
+        font-size: 16px !important; 
+        font-weight: 900 !important; 
+        color: #fff !important; 
+        z-index: 5 !important; 
+        text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 5px #00d2ff !important; 
     }
-    .badge-specific, .badge-free {
-        width: 22px !important;
-        height: 22px !important;
-        font-size: 13px !important;
-        border: 2px solid #fff !important;
-        box-shadow: 0 0 5px #000 !important;
+    
+    /* コストのバッジ配置 */
+    .cost-container { 
+        position: absolute; 
+        top: -2px !important; 
+        left: -6px !important; 
+        display: flex; 
+        flex-direction: column; 
+        gap: -4px !important; /* バッジ同士を少し重ねる */
+        z-index: 6; 
     }
-    .badge-specific { background-color: #d80032 !important; }
-
-    @media (max-height: 850px) {
-        .hand-card { width: 75px !important; height: 75px !important; }
+    .badge-specific { 
+        background-color: #00e600 !important; /* 明るい緑 */
+        color: #000 !important; 
+        border-radius: 50% !important; 
+        width: 18px !important; 
+        height: 18px !important; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 11px !important; 
+        font-weight: 900 !important; 
+        border: 2px solid #333 !important; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5) !important; 
+        position: relative;
+        z-index: 2;
     }
-    @media (max-height: 700px) {
-        .hand-card { width: 65px !important; height: 65px !important; }
-        .card-atk-text { font-size: 16px !important; }
+    .badge-free { 
+        background-color: #dcdcdc !important; /* グレー */
+        color: #000 !important; 
+        border-radius: 50% !important; 
+        width: 18px !important; 
+        height: 18px !important; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 11px !important; 
+        font-weight: 900 !important; 
+        border: 2px solid #333 !important; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5) !important; 
+        position: relative;
+        z-index: 1;
+        margin-top: -4px; /* 重なり表現 */
     }
+    
+    /* 名前とランクの調整 */
+    .card-name {
+        position: absolute;
+        bottom: 12px;
+        width: 100%;
+        text-align: center;
+        font-size: 9px !important;
+        font-weight: bold;
+        color: #fff;
+        text-shadow: 1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000;
+        z-index: 5;
+    }
+    .card-rank { display: none !important; } /* スッキリ見せるため非表示化 */
 `;
 document.head.appendChild(animStyles);
 
-// ====== 中央メッセージ用UI作成 ======
 let msgOverlay = document.createElement('div');
 msgOverlay.id = 'center-msg-overlay';
 msgOverlay.className = 'center-message';
@@ -113,7 +172,6 @@ async function showCenterMessage(msg, typeClass, duration) {
     }
 }
 
-// ====== タイマーUIの動的クローン・分離 ======
 const timeContainer = document.getElementById('time-container');
 if (timeContainer && !document.getElementById('time-container-top')) {
     timeContainer.id = 'time-container-bottom';
@@ -141,8 +199,6 @@ let isHost = false;
 let myDeckChoice = "";
 let isOnlineMode = false;
 let isGameOver = false;
-
-// 連続対戦時の非同期バグ防止用ID
 let currentMatchId = 0; 
 let consecutivePasses = 0; 
 
@@ -227,7 +283,6 @@ function applyStandeeImage(element, cardId) {
 
 function resetGameState() {
     currentMatchId++; 
-    
     if (currentRoomId) {
         db.ref('rooms/' + currentRoomId).off();
         currentRoomId = null;
@@ -676,7 +731,7 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             
             if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a054') {
                 el.className = `hand-card card-${card.type}`;
-                applyCardImage(el, card.id);
+                applyCardImage(el, card.id); 
                 
                 let badgeClass = 'card-atk-badge';
                 if (card.original_atk !== undefined) {
@@ -1649,6 +1704,7 @@ function checkGameOverAndChangeTurn() {
     startTurn();
 }
 
+// ====== 手札の一括反映処理 ======
 async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, finalCard) {
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
     let handsChanged = false;
@@ -1701,6 +1757,7 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     }
 }
 
+// ====== 盤面への石置きメイン関数 ======
 async function placeStone(index) {
     if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     const result = getFlippableAndTriggers(index, currentPlayer);
@@ -2000,7 +2057,6 @@ function renderBoard() {
             if (boardData[i].type === 'stone') stone.classList.add('card-stone');
             else { 
                 stone.classList.add(`card-${boardData[i].type}`); 
-                // 盤面上の石もフォールバック読み込み
                 applyCardImage(stone, boardData[i].id);
                 stone.innerHTML = `<div class="card-name card-text-node">${boardData[i].name || ''}</div>`; 
             }
