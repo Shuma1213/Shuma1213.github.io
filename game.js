@@ -23,8 +23,7 @@ animStyles.innerHTML = `
     .fade-out-stone { opacity: 0 !important; transform: scale(0) !important; transition: all 1s ease-in-out !important; }
     .fade-out-stone .stone-standee { opacity: 0 !important; transition: opacity 1s ease-in-out !important; }
 
-    /* ====== 1枚目画像：タイマー位置の修正 ====== */
-    #time-container-bottom { position: absolute; left: 15px; bottom: 175px; } /* 手札に被らない高さへ移動 */
+    #time-container-bottom { position: absolute; left: 15px; bottom: 175px; } 
     #time-container-top { position: absolute; right: 15px; top: 110px; border-color: #a843ff; box-shadow: 0 0 10px rgba(168,67,255,0.3); flex-direction: column; align-items: center; background: rgba(0,0,0,0.7); padding: 4px 10px; clip-path: polygon(20% 0, 80% 0, 100% 25%, 100% 75%, 80% 100%, 20% 100%, 0 75%, 0 25%); z-index: 5; }
     
     .center-message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: bold; color: white; z-index: 30000; pointer-events: none; opacity: 0; transition: opacity 0.2s; text-align: center; width: 100%; letter-spacing: 2px; }
@@ -34,13 +33,13 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
-    /* ====== 3枚目画像：立ち絵演出の理想化 ====== */
+    /* ====== 立ち絵（スタンディ）の立体感の理想化 ====== */
     .stone-standee { 
         position: absolute; 
-        bottom: 0%; /* コマの底面を基準にする */
-        left: -30%; /* はみ出す幅の分だけ中央に寄せる */
-        width: 160%; 
-        height: 180%; /* コマの上部に大きく飛び出すサイズ */
+        bottom: 5%; 
+        left: -35%;
+        width: 170%; 
+        height: 220%; /* 縦長に伸ばす */
         display: flex; 
         flex-direction: column; 
         justify-content: flex-end; 
@@ -49,20 +48,23 @@ animStyles.innerHTML = `
         transition: opacity 0.3s ease; 
         z-index: 10; 
         pointer-events: none; 
-        filter: drop-shadow(0 5px 5px rgba(0,0,0,0.6));
-        /* ここには rotateX を加えず、盤面の傾きにそのまま乗せる */
+        filter: drop-shadow(0 8px 6px rgba(0,0,0,0.7));
     }
     #board-container.tilted .stone-standee { 
         opacity: 1; 
+        /* ボードの傾き(35deg)を逆回転(-35deg)で相殺し、画面に対して真っ直ぐ立たせる */
+        transform: rotateX(-35deg) translateY(-15px) scale(1.1); 
+        transform-origin: bottom center;
     }
 
-    /* ====== 2枚目画像：手札カードのUIデザイン改修 ====== */
+    /* ====== 手札カードUI 本家仕様 ====== */
     .hand-card { 
-        border-radius: 50% !important; /* カードを円形に */
-        border: 2px solid #aaa !important; 
+        border-radius: 50% !important; 
+        border: 2px solid #ccc !important; 
         background-color: #222 !important;
-        width: 75px !important;
-        height: 75px !important;
+        width: 80px !important;
+        height: 80px !important;
+        overflow: visible !important; /* バッジがはみ出せるようにする */
     }
     .hand-card.card-action { 
         border-radius: 10px !important; 
@@ -70,82 +72,80 @@ animStyles.innerHTML = `
         border-color: #a843ff !important;
     }
     
-    /* ATKのひし形とテキスト */
+    /* ATK ひし形バッジ (右上) */
     .card-atk-badge { 
         position: absolute; 
-        top: -8px !important; 
-        left: 50% !important; 
-        transform: translateX(-50%) rotate(45deg) !important; 
-        width: 22px !important; 
-        height: 22px !important; 
+        top: -6px !important; 
+        right: -6px !important; 
+        left: auto !important; 
+        transform: rotate(45deg) !important; 
+        width: 28px !important; 
+        height: 28px !important; 
         background: linear-gradient(135deg, #00d2ff, #0055ff) !important; 
-        border: 1px solid #fff !important; 
+        border: 1.5px solid #fff !important; 
         z-index: 4 !important; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        box-shadow: 0 3px 5px rgba(0,0,0,0.7) !important;
     }
     .card-atk-badge.debuffed { background: linear-gradient(135deg, #9c27b0, #4b0082) !important; }
     .card-atk-badge.buffed { background: linear-gradient(135deg, #ff9800, #ff5722) !important; }
     
     .card-atk-text { 
         position: absolute; 
-        top: -6px !important; 
-        left: 50% !important; 
-        transform: translateX(-50%) !important; 
+        top: -2px !important; 
+        right: -5px !important; 
+        left: auto !important; 
+        width: 28px;
+        text-align: center;
+        transform: none !important; 
         font-size: 16px !important; 
         font-weight: 900 !important; 
         color: #fff !important; 
         z-index: 5 !important; 
-        text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 5px #00d2ff !important; 
+        text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 6px #00d2ff !important; 
     }
     
-    /* コストのバッジ配置 */
+    /* コストバッジ (左上) */
     .cost-container { 
         position: absolute; 
-        top: -2px !important; 
-        left: -6px !important; 
+        top: -5px !important; 
+        left: -5px !important; 
         display: flex; 
         flex-direction: column; 
-        gap: -4px !important; /* バッジ同士を少し重ねる */
+        gap: 0px !important; 
         z-index: 6; 
     }
-    .badge-specific { 
-        background-color: #00e600 !important; /* 明るい緑 */
-        color: #000 !important; 
+    .badge-specific, .badge-free {
         border-radius: 50% !important; 
-        width: 18px !important; 
-        height: 18px !important; 
+        width: 22px !important; 
+        height: 22px !important; 
         display: flex; 
         align-items: center; 
         justify-content: center; 
-        font-size: 11px !important; 
+        font-size: 13px !important; 
         font-weight: 900 !important; 
-        border: 2px solid #333 !important; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.5) !important; 
-        position: relative;
-        z-index: 2;
+        border: 2px solid #555 !important; 
+        box-shadow: 0 3px 5px rgba(0,0,0,0.7) !important; 
+        color: #fff !important;
+        text-shadow: 1px 1px 2px #000;
+        background-color: #111 !important;
     }
-    .badge-free { 
-        background-color: #dcdcdc !important; /* グレー */
-        color: #000 !important; 
-        border-radius: 50% !important; 
-        width: 18px !important; 
-        height: 18px !important; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        font-size: 11px !important; 
-        font-weight: 900 !important; 
-        border: 2px solid #333 !important; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.5) !important; 
-        position: relative;
-        z-index: 1;
-        margin-top: -4px; /* 重なり表現 */
-    }
-    
-    /* 名前とランクの調整 */
+    .badge-specific { z-index: 2; }
+    .badge-free { z-index: 1; margin-top: -6px; }
+
+    /* コスト達成時の点滅アニメーション */
+    @keyframes pulse-exam { 0% { box-shadow: 0 0 5px #2ecc71, inset 0 0 5px #2ecc71; border-color: #2ecc71; } 50% { box-shadow: 0 0 15px #2ecc71, inset 0 0 15px #2ecc71; border-color: #fff; } 100% { box-shadow: 0 0 5px #2ecc71, inset 0 0 5px #2ecc71; border-color: #2ecc71; } }
+    @keyframes pulse-troupe { 0% { box-shadow: 0 0 5px #8e44ad, inset 0 0 5px #8e44ad; border-color: #8e44ad; } 50% { box-shadow: 0 0 15px #8e44ad, inset 0 0 15px #8e44ad; border-color: #fff; } 100% { box-shadow: 0 0 5px #8e44ad, inset 0 0 5px #8e44ad; border-color: #8e44ad; } }
+    @keyframes pulse-mafia { 0% { box-shadow: 0 0 5px #e74c3c, inset 0 0 5px #e74c3c; border-color: #e74c3c; } 50% { box-shadow: 0 0 15px #e74c3c, inset 0 0 15px #e74c3c; border-color: #fff; } 100% { box-shadow: 0 0 5px #e74c3c, inset 0 0 5px #e74c3c; border-color: #e74c3c; } }
+    @keyframes pulse-free { 0% { box-shadow: 0 0 5px #ccc, inset 0 0 5px #ccc; border-color: #aaa; } 50% { box-shadow: 0 0 15px #fff, inset 0 0 15px #fff; border-color: #fff; } 100% { box-shadow: 0 0 5px #ccc, inset 0 0 5px #ccc; border-color: #aaa; } }
+
+    .cost-met-287期受験生 { animation: pulse-exam 1.2s infinite !important; background-color: rgba(46, 204, 113, 0.5) !important; color: #2ecc71 !important; }
+    .cost-met-幻影旅団 { animation: pulse-troupe 1.2s infinite !important; background-color: rgba(142, 68, 173, 0.5) !important; color: #e0b0ff !important; }
+    .cost-met-マフィアンコミュニティー { animation: pulse-mafia 1.2s infinite !important; background-color: rgba(231, 76, 60, 0.5) !important; color: #ffcccc !important; }
+    .cost-met-free { animation: pulse-free 1.2s infinite !important; background-color: rgba(255, 255, 255, 0.2) !important; color: #fff !important; }
+
     .card-name {
         position: absolute;
-        bottom: 12px;
+        bottom: 8px;
         width: 100%;
         text-align: center;
         font-size: 9px !important;
@@ -154,7 +154,11 @@ animStyles.innerHTML = `
         text-shadow: 1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000;
         z-index: 5;
     }
-    .card-rank { display: none !important; } /* スッキリ見せるため非表示化 */
+    .card-rank { display: none !important; }
+
+    @media (max-height: 850px) {
+        .hand-card { width: 70px !important; height: 70px !important; }
+    }
 `;
 document.head.appendChild(animStyles);
 
@@ -754,8 +758,12 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
                 displayFree -= freePaid;
 
                 let costHtml = `<div class="cost-container">`;
-                if (displaySpec > 0) costHtml += `<div class="badge-specific">${displaySpec}</div>`;
-                if (displayFree > 0) costHtml += `<div class="badge-free">${displayFree}</div>`;
+                
+                let specGlowClass = displaySpec === 0 && card.cost.specific > 0 ? ` cost-met-${card.group}` : '';
+                let freeGlowClass = displayFree === 0 && card.cost.free > 0 ? ` cost-met-free` : '';
+
+                if (card.cost.specific > 0) costHtml += `<div class="badge-specific${specGlowClass}">${displaySpec}</div>`;
+                if (card.cost.free > 0) costHtml += `<div class="badge-free${freeGlowClass}">${displayFree}</div>`;
                 costHtml += `</div>`;
 
                 el.innerHTML = `<div class="${badgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':card.atk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div>${costHtml}`;
@@ -902,8 +910,11 @@ function createCardElementUI(card, index, playerColor, isHandCard = true) {
     applyCardImage(el, card.id);
     
     let costHtml = `<div class="cost-container">`;
-    if (displaySpec > 0) costHtml += `<div class="badge-specific">${displaySpec}</div>`;
-    if (displayFree > 0) costHtml += `<div class="badge-free">${displayFree}</div>`;
+    let specGlowClass = displaySpec === 0 && card.cost.specific > 0 ? ` cost-met-${card.group}` : '';
+    let freeGlowClass = displayFree === 0 && card.cost.free > 0 ? ` cost-met-free` : '';
+
+    if (card.cost.specific > 0) costHtml += `<div class="badge-specific${specGlowClass}">${displaySpec}</div>`;
+    if (card.cost.free > 0) costHtml += `<div class="badge-free${freeGlowClass}">${displayFree}</div>`;
     costHtml += `</div>`;
 
     el.innerHTML = `<div class="${atkBadgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':displayAtk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div>${costHtml}`;
@@ -1623,6 +1634,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
         }
     }
 
+    // 0075の破壊後処理（すべての攻撃・コンボが終了した後）
     if (pendingDestroyIdx !== -1) {
         boardData[pendingDestroyIdx] = { color: targetPlayer, type: 'stone', name: '' };
         logDisplay.textContent = `💥ウボォーギンの能力！キャラを破壊！`;
@@ -1704,7 +1716,6 @@ function checkGameOverAndChangeTurn() {
     startTurn();
 }
 
-// ====== 手札の一括反映処理 ======
 async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, finalCard) {
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
     let handsChanged = false;
@@ -1757,7 +1768,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     }
 }
 
-// ====== 盤面への石置きメイン関数 ======
 async function placeStone(index) {
     if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     const result = getFlippableAndTriggers(index, currentPlayer);
@@ -1803,7 +1813,6 @@ async function placeStone(index) {
         await sleep(500);
 
         let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
-
         const abilityId = finalCard.stolenFromId || finalCard.id;
 
         if (costStatus === 'OK' && triggerMet) {
