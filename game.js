@@ -33,26 +33,72 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
+    /* ====== 立ち絵（スタンディ）の大型化 ====== */
     .stone-standee { 
         position: absolute; 
-        top: 0; left: 0;
-        width: 100%; 
-        height: 100%; 
+        bottom: 5%; 
+        left: -30%;
+        width: 160%; 
+        height: 200%; 
         display: flex; 
         flex-direction: column; 
-        justify-content: center; 
+        justify-content: flex-end; 
         align-items: center; 
         opacity: 0; 
         transition: opacity 0.3s ease; 
         z-index: 10; 
         pointer-events: none; 
+        filter: drop-shadow(0 5px 5px rgba(0,0,0,0.6));
     }
     #board-container.tilted .stone-standee { 
         opacity: 1; 
+        transform: rotateX(-35deg) translateY(-25px) scale(1.3); 
+        transform-origin: bottom center;
+    }
+
+    /* ====== 手札カードの大型化とUI調整 ====== */
+    .hand-card {
+        width: 85px !important;
+        height: 85px !important;
+        border: 3px solid #ccc;
+    }
+    .hand-card.card-action {
+        border-radius: 0;
+        border: 2px solid #a843ff;
+    }
+    .card-atk-text {
+        font-size: 20px !important;
+        top: 2px !important;
+        left: 8px !important;
+        transform: none !important;
+        text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 8px #000 !important;
+    }
+    .cost-container {
+        top: -5px !important;
+        left: auto !important;
+        right: -5px !important;
+        flex-direction: row !important;
+    }
+    .badge-specific, .badge-free {
+        width: 22px !important;
+        height: 22px !important;
+        font-size: 13px !important;
+        border: 2px solid #fff !important;
+        box-shadow: 0 0 5px #000 !important;
+    }
+    .badge-specific { background-color: #d80032 !important; }
+
+    @media (max-height: 850px) {
+        .hand-card { width: 75px !important; height: 75px !important; }
+    }
+    @media (max-height: 700px) {
+        .hand-card { width: 65px !important; height: 65px !important; }
+        .card-atk-text { font-size: 16px !important; }
     }
 `;
 document.head.appendChild(animStyles);
 
+// ====== 中央メッセージ用UI作成 ======
 let msgOverlay = document.createElement('div');
 msgOverlay.id = 'center-msg-overlay';
 msgOverlay.className = 'center-message';
@@ -67,6 +113,7 @@ async function showCenterMessage(msg, typeClass, duration) {
     }
 }
 
+// ====== タイマーUIの動的クローン・分離 ======
 const timeContainer = document.getElementById('time-container');
 if (timeContainer && !document.getElementById('time-container-top')) {
     timeContainer.id = 'time-container-bottom';
@@ -94,6 +141,8 @@ let isHost = false;
 let myDeckChoice = "";
 let isOnlineMode = false;
 let isGameOver = false;
+
+// 連続対戦時の非同期バグ防止用ID
 let currentMatchId = 0; 
 let consecutivePasses = 0; 
 
@@ -161,7 +210,7 @@ function applyStandeeImage(element, cardId) {
         element.style.backgroundImage = `url('${path1}')`;
         element.style.backgroundSize = 'contain';
         element.style.backgroundRepeat = 'no-repeat';
-        element.style.backgroundPosition = 'center';
+        element.style.backgroundPosition = 'bottom center';
     };
     img.onerror = () => {
         const img2 = new Image();
@@ -169,7 +218,7 @@ function applyStandeeImage(element, cardId) {
             element.style.backgroundImage = `url('${path2}')`;
             element.style.backgroundSize = 'contain';
             element.style.backgroundRepeat = 'no-repeat';
-            element.style.backgroundPosition = 'center';
+            element.style.backgroundPosition = 'bottom center';
         };
         img2.src = path2;
     };
@@ -178,6 +227,7 @@ function applyStandeeImage(element, cardId) {
 
 function resetGameState() {
     currentMatchId++; 
+    
     if (currentRoomId) {
         db.ref('rooms/' + currentRoomId).off();
         currentRoomId = null;
@@ -580,7 +630,6 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
     if (filterType === 'character' || filterType === 'debuff') {
         selectableCards = nonNullCards.filter(c => c.type === 'character');
     } else if (filterType === 'steal_a054') {
-        // A054極意：コスト5以下のキャラ限定
         selectableCards = nonNullCards.filter(c => c.type === 'character' && (c.cost.specific + c.cost.free) <= 5);
     }
 
@@ -627,7 +676,7 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             
             if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a054') {
                 el.className = `hand-card card-${card.type}`;
-                applyCardImage(el, card.id); 
+                applyCardImage(el, card.id);
                 
                 let badgeClass = 'card-atk-badge';
                 if (card.original_atk !== undefined) {
@@ -635,7 +684,25 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
                     if (card.atk < card.original_atk) badgeClass += ' debuffed';
                 }
                 
-                let costHtml = `<div class="cost-container">${card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
+                // 動的コスト計算表示
+                let displaySpec = card.cost.specific;
+                let displayFree = card.cost.free;
+                const pGP = playerGP[targetPlayer].gp;
+                const availSpec = pGP[card.group] || 0;
+                const totalGP = Object.values(pGP).reduce((sum, val) => sum + val, 0);
+
+                let specPaid = Math.min(displaySpec, availSpec);
+                displaySpec -= specPaid;
+                
+                let remainingTotalGP = totalGP - specPaid;
+                let freePaid = Math.min(displayFree, remainingTotalGP);
+                displayFree -= freePaid;
+
+                let costHtml = `<div class="cost-container">`;
+                if (displaySpec > 0) costHtml += `<div class="badge-specific">${displaySpec}</div>`;
+                if (displayFree > 0) costHtml += `<div class="badge-free">${displayFree}</div>`;
+                costHtml += `</div>`;
+
                 el.innerHTML = `<div class="${badgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':card.atk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div>${costHtml}`;
             } else {
                 el.className = card.type === 'character' ? 'hidden-char' : 'hidden-action';
@@ -758,9 +825,33 @@ function createCardElementUI(card, index, playerColor, isHandCard = true) {
         else if (card.atk < card.original_atk) atkBadgeClass += ' debuffed';
     }
 
+    // 動的コスト計算表示
+    let displaySpec = card.cost.specific;
+    let displayFree = card.cost.free;
+    
+    if (isHandCard) {
+        const pGP = playerGP[playerColor].gp;
+        const group = card.group;
+        const availSpec = pGP[group] || 0;
+        const totalGP = Object.values(pGP).reduce((sum, val) => sum + val, 0);
+
+        let specPaid = Math.min(displaySpec, availSpec);
+        displaySpec -= specPaid;
+        
+        let remainingTotalGP = totalGP - specPaid;
+        let freePaid = Math.min(displayFree, remainingTotalGP);
+        displayFree -= freePaid;
+    }
+
     el.className = className; 
     applyCardImage(el, card.id);
-    el.innerHTML = `<div class="${atkBadgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':displayAtk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div><div class="cost-container">${card.cost.specific > 0 ? `<div class="badge-specific">${card.cost.specific}</div>` : ''}${card.cost.free > 0 ? `<div class="badge-free">${card.cost.free}</div>` : ''}</div>`;
+    
+    let costHtml = `<div class="cost-container">`;
+    if (displaySpec > 0) costHtml += `<div class="badge-specific">${displaySpec}</div>`;
+    if (displayFree > 0) costHtml += `<div class="badge-free">${displayFree}</div>`;
+    costHtml += `</div>`;
+
+    el.innerHTML = `<div class="${atkBadgeClass}"></div><div class="card-atk-text card-text-node">${card.type==='action'?'A':displayAtk}</div><div class="card-rank card-text-node">${card.rank}</div><div class="card-name card-text-node">${card.name}</div>${costHtml}`;
     return el;
 }
 
@@ -1040,7 +1131,6 @@ async function playActionCard(index) {
     else if (id === "A158") {
         drawCards(currentPlayer, 1); handsChanged = true;
     }
-    // 【修正：A054 盗賊の極意の処理】
     else if (id === "A054") {
         await animateGPFly(14, currentPlayer, '幻影旅団');
         playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
@@ -1055,7 +1145,7 @@ async function playActionCard(index) {
             chrolloCard.atk = 30;
             chrolloCard.ability = target.ability;
             chrolloCard.combo = target.combo;
-            chrolloCard.stolenFromId = target.id; // 動的発動用に元のIDを記録
+            chrolloCard.stolenFromId = target.id; 
             
             target.ability = null;
             target.combo = null;
@@ -1366,7 +1456,6 @@ async function executeCombat(index, playerColor, finalCard, result) {
 
     if (hpYellow <= 0 || hpPurple <= 0) return true; 
 
-    // 【修正：能力計算に stolenFromId を考慮させる】
     const abilityId = finalCard.stolenFromId || finalCard.id;
     let pendingDestroyIdx = -1;
 
@@ -1479,7 +1568,6 @@ async function executeCombat(index, playerColor, finalCard, result) {
         }
     }
 
-    // 0075の破壊後処理
     if (pendingDestroyIdx !== -1) {
         boardData[pendingDestroyIdx] = { color: targetPlayer, type: 'stone', name: '' };
         logDisplay.textContent = `💥ウボォーギンの能力！キャラを破壊！`;
@@ -1561,7 +1649,6 @@ function checkGameOverAndChangeTurn() {
     startTurn();
 }
 
-// ====== 手札の一括反映処理 ======
 async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, finalCard) {
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
     let handsChanged = false;
@@ -1614,7 +1701,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     }
 }
 
-// ====== 盤面への石置きメイン関数 ======
 async function placeStone(index) {
     if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     const result = getFlippableAndTriggers(index, currentPlayer);
@@ -1661,7 +1747,6 @@ async function placeStone(index) {
 
         let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
 
-        // 【修正：能力発動時は stolenFromId も考慮する】
         const abilityId = finalCard.stolenFromId || finalCard.id;
 
         if (costStatus === 'OK' && triggerMet) {
@@ -1726,7 +1811,6 @@ async function placeStone(index) {
     }
 }
 
-// ====== タイマー管理機能 ======
 function startTurnTimer() {
     if (timerId) clearInterval(timerId); 
     const isMe = currentPlayer === myColor; 
@@ -1916,7 +2000,8 @@ function renderBoard() {
             if (boardData[i].type === 'stone') stone.classList.add('card-stone');
             else { 
                 stone.classList.add(`card-${boardData[i].type}`); 
-                if (boardData[i].id) stone.style.backgroundImage = `url('cards/${String(boardData[i].id).trim()}.png')`; 
+                // 盤面上の石もフォールバック読み込み
+                applyCardImage(stone, boardData[i].id);
                 stone.innerHTML = `<div class="card-name card-text-node">${boardData[i].name || ''}</div>`; 
             }
             if(hasGlow) stone.classList.add('active-buff-glow');
