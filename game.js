@@ -21,6 +21,7 @@ animStyles.innerHTML = `
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
     
     .fade-out-stone { opacity: 0 !important; transform: scale(0) !important; transition: all 1s ease-in-out !important; }
+    .fade-out-stone .stone-standee { opacity: 0 !important; transition: opacity 1s ease-in-out !important; }
 
     #time-container-bottom { position: absolute; left: 15px; bottom: 125px; }
     #time-container-top { position: absolute; right: 15px; top: 110px; border-color: #a843ff; box-shadow: 0 0 10px rgba(168,67,255,0.3); flex-direction: column; align-items: center; background: rgba(0,0,0,0.7); padding: 4px 10px; clip-path: polygon(20% 0, 80% 0, 100% 25%, 100% 75%, 80% 100%, 20% 100%, 0 75%, 0 25%); z-index: 5; }
@@ -32,7 +33,6 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
-    /* ====== キャラクター画像（盤面用フラット表示） ====== */
     .stone-standee { 
         position: absolute; 
         top: 0; left: 0;
@@ -47,7 +47,6 @@ animStyles.innerHTML = `
         z-index: 10; 
         pointer-events: none; 
     }
-    /* 盤面が斜めになったタイミングのみ表示 */
     #board-container.tilted .stone-standee { 
         opacity: 1; 
     }
@@ -203,6 +202,8 @@ function resetGameState() {
     msgOverlay.classList.remove('show');
     document.querySelectorAll('.damage-popup').forEach(e => e.remove());
     document.querySelectorAll('.gp-fly-particle').forEach(e => e.remove());
+    document.querySelectorAll('.stone').forEach(e => e.classList.remove('fade-out-stone'));
+    document.querySelectorAll('.stone-standee').forEach(e => e.classList.remove('fade-out-stone'));
     boardElement.innerHTML = '';
     if (svgGroup) svgGroup.innerHTML = '';
     document.getElementById('hand-top').innerHTML = '';
@@ -522,7 +523,7 @@ function checkCostStatus(card, playerColor) {
 }
 
 function checkAbilityMet(card, index, flippable, playerColor) {
-    if (card.stolen) return false; // 盗まれたカードは能力使用不可
+    if (card.stolen) return false; 
     if (!card.ability || !card.ability.text) return true;
     const text = card.ability.text;
     let met = true;
@@ -578,8 +579,8 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
     let selectableCards = nonNullCards;
     if (filterType === 'character' || filterType === 'debuff') {
         selectableCards = nonNullCards.filter(c => c.type === 'character');
-    } else if (filterType === 'steal_a087') {
-        // 極意：コスト5以下のキャラ限定
+    } else if (filterType === 'steal_a054') {
+        // A054極意：コスト5以下のキャラ限定
         selectableCards = nonNullCards.filter(c => c.type === 'character' && (c.cost.specific + c.cost.free) <= 5);
     }
 
@@ -590,7 +591,11 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             return [];
         }
         if (selectableCards.length <= count) {
-            logDisplay.textContent = `自動選択: ${selectableCards.map(c=>c.name).join(', ')}`;
+            if (targetPlayer === actingPlayer) {
+                logDisplay.textContent = `自動選択: ${selectableCards.map(c=>c.name).join(', ')}`;
+            } else {
+                logDisplay.textContent = `自動選択を行いました`;
+            }
             await sleep(1000);
             return selectableCards;
         }
@@ -620,9 +625,9 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             const isSelectable = selectableCards.includes(card);
             const el = document.createElement('div');
             
-            if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a087') {
+            if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a054') {
                 el.className = `hand-card card-${card.type}`;
-                applyCardImage(el, card.id);
+                applyCardImage(el, card.id); 
                 
                 let badgeClass = 'card-atk-badge';
                 if (card.original_atk !== undefined) {
@@ -1035,11 +1040,12 @@ async function playActionCard(index) {
     else if (id === "A158") {
         drawCards(currentPlayer, 1); handsChanged = true;
     }
-    else if (id === "A087") {
+    // 【修正：A054 盗賊の極意の処理】
+    else if (id === "A054") {
         await animateGPFly(14, currentPlayer, '幻影旅団');
         playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
         
-        let selectedCards = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を盗むキャラを選択（コスト5以下）', 'steal_a087');
+        let selectedCards = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を盗むキャラを選択（コスト5以下）', 'steal_a054');
         
         let chrolloCard = getCardById("0141");
         if (!chrolloCard) chrolloCard = { id: "0141", type: "character", name: "クロロ", rank: "S", cost: { specific: 0, free: 0 }, atk: 10, group: "幻影旅団" };
@@ -1049,6 +1055,7 @@ async function playActionCard(index) {
             chrolloCard.atk = 30;
             chrolloCard.ability = target.ability;
             chrolloCard.combo = target.combo;
+            chrolloCard.stolenFromId = target.id; // 動的発動用に元のIDを記録
             
             target.ability = null;
             target.combo = null;
@@ -1061,6 +1068,18 @@ async function playActionCard(index) {
         
         hand[index] = chrolloCard;
         handsChanged = true;
+    }
+    else if (id === "A087") {
+        await animateGPFly(14, currentPlayer, '幻影旅団');
+        playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
+        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
+        const chars = oppHand.filter(c => c && c.type === 'character');
+        if (chars.length > 0) {
+            const target = chars[Math.floor(Math.random() * chars.length)];
+            target.atk = Math.max(0, target.atk - 4);
+            logDisplay.textContent = `相手の手札のATKを-4!`;
+            handsChanged = true;
+        }
     }
     else if (id === "A082") {
         const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
@@ -1347,7 +1366,10 @@ async function executeCombat(index, playerColor, finalCard, result) {
 
     if (hpYellow <= 0 || hpPurple <= 0) return true; 
 
-    // 能力ダメージ・回復
+    // 【修正：能力計算に stolenFromId を考慮させる】
+    const abilityId = finalCard.stolenFromId || finalCard.id;
+    let pendingDestroyIdx = -1;
+
     let abilityDamage = 0;
     if (finalCard.ability && finalCard.ability.text) {
         const text = finalCard.ability.text;
@@ -1356,13 +1378,13 @@ async function executeCombat(index, playerColor, finalCard, result) {
         if (sMatch) abilityDamage += parseInt(sMatch[1]);
         if (nMatch) abilityDamage += parseInt(nMatch[1]);
 
-        if (finalCard.id === "0183") {
+        if (abilityId === "0183") {
             if (hasOpponentCharFlipped) {
                 abilityDamage += 5;
             }
         }
         
-        if (finalCard.id === "0075") {
+        if (abilityId === "0075") {
             let surroundingOpponentChars = [];
             const cx = index % boardSize; 
             const cy = Math.floor(index / boardSize);
@@ -1377,20 +1399,15 @@ async function executeCombat(index, playerColor, finalCard, result) {
                 }
             }
             if (surroundingOpponentChars.length > 0) {
-                let targetIdx = surroundingOpponentChars[Math.floor(Math.random() * surroundingOpponentChars.length)];
-                boardData[targetIdx] = { color: targetPlayer, type: 'stone', name: '' };
-                logDisplay.textContent = `💥ウボォーギンの能力！キャラを破壊！`;
-                renderBoard();
-                if (isOnlineMode) pushGameStateToFirebase();
-                await sleep(400);
+                pendingDestroyIdx = surroundingOpponentChars[Math.floor(Math.random() * surroundingOpponentChars.length)];
                 abilityDamage += 13;
             }
         }
 
-        if (finalCard.id === "0003") {
+        if (abilityId === "0003") {
             activeEffects.push({ player: playerColor, type: 'leorio_buff', amount: 2, turnsLeft: 3 });
         }
-        if (finalCard.id === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
+        if (abilityId === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1 });
         
         const hMatch = text.match(/HPを(\d+)回復/);
         if (hMatch && result.flippable.length >= 2) {
@@ -1402,15 +1419,15 @@ async function executeCombat(index, playerColor, finalCard, result) {
             if (isOnlineMode) pushGameStateToFirebase();
         }
 
-        if (finalCard.id === "0064") {
+        if (abilityId === "0064") {
             const oppHand = playerColor === 'yellow' ? handPurple : handYellow;
             oppHand.filter(c => c && c.type === 'character').forEach(c => { c.atk = Math.max(0, c.atk - 3); });
             logDisplay.textContent = `⚡相手の手札をデバフ！`;
             renderHands();
         }
 
-        if (finalCard.id === "0066") activeEffects.push({ player: playerColor, type: 'reduce_damage_all', amount: 2, turnsLeft: 3, index: index, cardId: finalCard.id });
-        if (finalCard.id === "0060") activeEffects.push({ player: playerColor, type: 'reduce_damage_normal', amount: 4, turnsLeft: 4, index: index, cardId: finalCard.id });
+        if (abilityId === "0066") activeEffects.push({ player: playerColor, type: 'reduce_damage_all', amount: 2, turnsLeft: 3, index: index, cardId: finalCard.id });
+        if (abilityId === "0060") activeEffects.push({ player: playerColor, type: 'reduce_damage_normal', amount: 4, turnsLeft: 4, index: index, cardId: finalCard.id });
     }
     
     if (abilityDamage > 0) {
@@ -1462,9 +1479,18 @@ async function executeCombat(index, playerColor, finalCard, result) {
         }
     }
 
+    // 0075の破壊後処理
+    if (pendingDestroyIdx !== -1) {
+        boardData[pendingDestroyIdx] = { color: targetPlayer, type: 'stone', name: '' };
+        logDisplay.textContent = `💥ウボォーギンの能力！キャラを破壊！`;
+        renderBoard();
+        if (isOnlineMode) pushGameStateToFirebase();
+        await sleep(500);
+    }
+
     await animateGPFly(index, playerColor, finalCard.group);
     playerGP[playerColor].gp[finalCard.group] = (playerGP[playerColor].gp[finalCard.group] || 0) + 1;
-    if (finalCard.ability && finalCard.id === "0073") {
+    if (finalCard.ability && abilityId === "0073") {
         await animateGPFly(index, playerColor, '幻影旅団');
         playerGP[playerColor].gp['幻影旅団'] = (playerGP[playerColor].gp['幻影旅団'] || 0) + 1;
     }
@@ -1571,9 +1597,11 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     activeEffects = activeEffects.filter(e => e.turnsLeft > 0);
 
     for (let c of debuffList) { c.atk = Math.max(0, c.atk - 10); handsChanged = true; buffLog = true; }
+    
+    const abilityId = finalCard && (finalCard.stolenFromId || finalCard.id);
     for (let c of buffTargets) {
-        if (finalCard && finalCard.id === "0002") c.atk += 3;
-        if (finalCard && (finalCard.id === "0031" || finalCard.id === "0028")) c.atk += 5;
+        if (abilityId === "0002") c.atk += 3;
+        if (abilityId === "0031" || abilityId === "0028") c.atk += 5;
         handsChanged = true;
         buffLog = true;
     }
@@ -1633,20 +1661,35 @@ async function placeStone(index) {
 
         let discardList = []; let returnList = []; let debuffList = []; let buffTargets = [];
 
+        // 【修正：能力発動時は stolenFromId も考慮する】
+        const abilityId = finalCard.stolenFromId || finalCard.id;
+
         if (costStatus === 'OK' && triggerMet) {
-            if (finalCard.id === "0004" || finalCard.id === "0010") {
+            if (abilityId === "0004" || abilityId === "0010") {
                 discardList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
             }
-            if (finalCard.id === "0046" || finalCard.id === "0048") {
+            if (abilityId === "0046" || abilityId === "0048") {
                 returnList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
+                const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
+                for (let c of returnList) {
+                    await animateHandCard(c, currentPlayer, 'card-return-anim');
+                    activeHand[activeHand.indexOf(c)] = null;
+                    const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+                    deck.push(c); shuffleDeck(deck);
+                }
+                if (returnList.length > 0) {
+                    renderHands();
+                    if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
+                    await sleep(300);
+                }
             }
-            if (finalCard.id === "0070") {
+            if (abilityId === "0070") {
                 debuffList = await selectHandCardsTarget(currentPlayer, opponentColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
             }
-            if (finalCard.id === "0002" || finalCard.id === "0031") {
+            if (abilityId === "0002" || abilityId === "0031") {
                 buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
             }
-            if (finalCard.id === "0028") {
+            if (abilityId === "0028") {
                 const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
                 const chars = activeHand.filter(c => c && c.type === 'character');
                 buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
@@ -1661,7 +1704,7 @@ async function placeStone(index) {
             return;
         }
 
-        await applyPendingChanges(discardList, returnList, debuffList, buffTargets, finalCard);
+        await applyPendingChanges(discardList, [], debuffList, buffTargets, finalCard);
 
     } catch (error) {
         console.error("Combat Error:", error);
