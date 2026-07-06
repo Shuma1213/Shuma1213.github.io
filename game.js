@@ -170,7 +170,6 @@ async function showCenterMessage(msg, typeClass, duration) {
     }
 }
 
-// 0058 複製演出用
 async function showCopiedCardAnim(card, player) {
     const el = document.createElement('div');
     el.className = `hand-card card-${card.type}`;
@@ -255,7 +254,6 @@ let lastDamageAnimTs = 0;
 let lastDamageRedTs = 0;
 let lastGpFlyTs = 0;
 
-// 制約・自傷持ちのカード
 const selfDamageIds = ["0091", "0103", "0104", "0105", "0112", "0117", "0164"];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -350,11 +348,12 @@ function getCardById(idStr) {
     return card ? JSON.parse(JSON.stringify({ ...card, original_atk: card.atk })) : null;
 }
 
+// デッキの内訳を更新
 function buildFixedDeck(deckType) {
     let deck = [];
     let ids = deckType === '287期受験生' ? 
-        ["A043","A043","A040","A040","A044","A039","0016","0016","0023","0023","0032","0032","0036","0036","0002","0002","0003","0003","0004","0004","0010","0010","0028","0028","0031","0031","0022","0022","0157","0157"] :
-        ["A054","A054","A087","A087","A082","A082","0055","0055","0066","0066","0073","0073","0075","0075","0046","0046","0048","0048","0183","0183","0064","0064","0070","0070","0065","0065","0060","0060","0160","0160"];
+        ["A043","A043","A044","A039","A040","A040","0002","0002","0010","0010","0004","0004","0156","0156","0003","0003","0155","0155","0031","0031","0017","0017","0023","0023","0032","0032","0036","0036","0016","0016"] :
+        ["A054","A054","A087","A087","A082","A082","0046","0046","0048","0048","0162","0162","0073","0073","0068","0068","0066","0066","0161","0161","0081","0081","0070","0070","0055","0055","0055","0055","0065","0065"];
     ids.forEach(id => { const c = getCardById(id); if(c) deck.push(c); });
     shuffleDeck(deck); return deck;
 }
@@ -726,7 +725,11 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             return [];
         }
         if (selectableCards.length <= count) {
-            logDisplay.textContent = `自動選択を行いました`; // 秘匿
+            if (targetPlayer === actingPlayer) {
+                logDisplay.textContent = `自動選択: ${selectableCards.map(c=>c.name).join(', ')}`;
+            } else {
+                logDisplay.textContent = `自動選択を行いました`;
+            }
             await sleep(1000);
             return selectableCards;
         }
@@ -1352,9 +1355,7 @@ async function playActionCard(index) {
         drawCards(currentPlayer, 1); handsChanged = true;
     }
     
-    // A056 攻撃後の処理を applyPendingChanges へ委譲
     if (id === "A056") abilityIdForPending = "0056";
-    // A058 の複製演出
     if (id === "A058") abilityIdForPending = "0058";
 
     if (handsChanged) {
@@ -1365,7 +1366,6 @@ async function playActionCard(index) {
     updateHPUI(); updateHighlightsAndLines();
     window.isBoardSelecting = false;
     
-    // 攻撃処理と同等のフェーズ終了処理
     await applyPendingChanges([], [], [], [], [], {id: abilityIdForPending});
 
     if (hpYellow <= 0 || hpPurple <= 0) { 
@@ -1711,7 +1711,6 @@ async function executeCombat(index, playerColor, finalCard, result) {
         }
     }
 
-    // 0075の破壊後処理（すべての攻撃・コンボが終了した後）
     if (pendingDestroyIdx !== -1) {
         boardData[pendingDestroyIdx] = { color: targetPlayer, type: 'stone', name: '' };
         logDisplay.textContent = `💥ウボォーギンの能力！キャラを破壊！`;
@@ -1793,7 +1792,6 @@ function checkGameOverAndChangeTurn() {
     startTurn();
 }
 
-// ====== 手札の一括反映処理 ======
 async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, sealTargets, finalCard) {
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
     const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
@@ -1801,7 +1799,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     let handsChanged = false;
     let buffLog = false;
 
-    // 0056 / 0100 攻撃後手札破壊
     const abilityId = finalCard && (finalCard.stolenFromId || finalCard.id);
     if (abilityId === "0056") {
         const valid = oppHand.filter(c => c && (c.cost.specific + c.cost.free) === 4);
@@ -1811,6 +1808,19 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
             oppHand[oppHand.indexOf(tgt)] = null;
             if (opponentColor === 'yellow') discardYellow.push(tgt); else discardPurple.push(tgt);
             handsChanged = true;
+        }
+    }
+    if (abilityId === "0100") {
+        const myHp = currentPlayer === 'yellow' ? hpYellow : hpPurple;
+        if (myHp <= 60) {
+            const valid = oppHand.filter(c => c && (c.cost.specific + c.cost.free) === 4);
+            if (valid.length > 0) {
+                const tgt = valid[Math.floor(Math.random() * valid.length)];
+                await animateHandCard(tgt, opponentColor, 'card-discard-anim');
+                oppHand[oppHand.indexOf(tgt)] = null;
+                if (opponentColor === 'yellow') discardYellow.push(tgt); else discardPurple.push(tgt);
+                handsChanged = true;
+            }
         }
     }
 
@@ -1845,7 +1855,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
         handsChanged = true;
     }
 
-    // 自分のターンの終了時に発動する継続効果（生存チェック付き）
     for (let i = 0; i < activeEffects.length; i++) {
         let effect = activeEffects[i];
         if (effect.player !== currentPlayer) continue; 
@@ -1908,7 +1917,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     }
 }
 
-// ====== 盤面への石置きメイン関数 ======
 async function placeStone(index) {
     if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
     const result = getFlippableAndTriggers(index, currentPlayer);
@@ -1979,7 +1987,6 @@ async function placeStone(index) {
                 buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
             }
             
-            // 制約（特殊ダメージ）の処理を選択フェーズの直後に実行
             if (selfDamageIds.includes(abilityId)) {
                 let { finalDamage: sDmg, reduction: sRed } = applyDamageReduction(2, 'special', currentPlayer);
                 if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
@@ -2104,6 +2111,47 @@ function startTurn() {
             if (matchId !== currentMatchId) return;
             applyPendingChanges([], [], [], [], [], {}).then(() => {
                 if (matchId !== currentMatchId) return;
+                
+                const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
+                const oppHand = opponentColor === 'yellow' ? handYellow : handPurple;
+                let autoHandsChanged = false;
+                for (let effect of activeEffects) {
+                    if (effect.player === currentPlayer) {
+                        let effectCard = boardData[effect.index];
+                        if (!effectCard || effectCard.type !== 'character' || effectCard.id !== effect.cardId || effectCard.color !== effect.player) {
+                            effect.turnsLeft = 0; 
+                            continue;
+                        }
+
+                        if (effect.turnsLeft > 0) {
+                            if (effect.type === 'machi_heal') {
+                                if (currentPlayer === 'yellow') hpYellow += 2; else hpPurple += 2;
+                                updateHPUI();
+                                effect.turnsLeft--;
+                            }
+                            if (effect.type === 'feitan_debuff') {
+                                const chars = oppHand.filter(c => c && c.type === 'character');
+                                if (chars.length > 0) {
+                                    const target = chars[Math.floor(Math.random() * chars.length)];
+                                    target.atk = Math.max(0, target.atk - 3);
+                                    autoHandsChanged = true;
+                                }
+                                effect.turnsLeft--;
+                            }
+                            if (effect.type === 'shalnark_debuff') {
+                                const chars = oppHand.filter(c => c && c.type === 'character');
+                                if (chars.length > 0) {
+                                    const target = chars[Math.floor(Math.random() * chars.length)];
+                                    target.atk = Math.max(0, target.atk - 4);
+                                    autoHandsChanged = true;
+                                }
+                                effect.turnsLeft--;
+                            }
+                        }
+                    }
+                }
+                if (autoHandsChanged) renderHands();
+
                 if (isOnlineMode) {
                     if (isMe) pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
                 } else {
@@ -2122,7 +2170,49 @@ function startTurn() {
     logDisplay.textContent = ""; 
     showCenterMessage(isMe ? "YOUR TURN" : "ENEMY'S TURN", "msg-turn", 1000);
 
-    renderBoard(); renderHands();
+    const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
+    const oppHand = opponentColor === 'yellow' ? handYellow : handPurple;
+    let autoHandsChanged = false;
+    for (let effect of activeEffects) {
+        if (effect.player === opponentColor) {
+            let effectCard = boardData[effect.index];
+            if (!effectCard || effectCard.type !== 'character' || effectCard.id !== effect.cardId || effectCard.color !== effect.player) {
+                effect.turnsLeft = 0; 
+                continue;
+            }
+
+            if (effect.turnsLeft > 0) {
+                if (effect.type === 'machi_heal') {
+                    if (opponentColor === 'yellow') hpYellow += 2; else hpPurple += 2;
+                    updateHPUI();
+                    effect.turnsLeft--;
+                }
+                if (effect.type === 'feitan_debuff') {
+                    const myHand = currentPlayer === 'yellow' ? handYellow : handPurple;
+                    const chars = myHand.filter(c => c && c.type === 'character');
+                    if (chars.length > 0) {
+                        const target = chars[Math.floor(Math.random() * chars.length)];
+                        target.atk = Math.max(0, target.atk - 3);
+                        autoHandsChanged = true;
+                    }
+                    effect.turnsLeft--;
+                }
+                if (effect.type === 'shalnark_debuff') {
+                    const myHand = currentPlayer === 'yellow' ? handYellow : handPurple;
+                    const chars = myHand.filter(c => c && c.type === 'character');
+                    if (chars.length > 0) {
+                        const target = chars[Math.floor(Math.random() * chars.length)];
+                        target.atk = Math.max(0, target.atk - 4);
+                        autoHandsChanged = true;
+                    }
+                    effect.turnsLeft--;
+                }
+            }
+        }
+    }
+    
+    renderBoard(); 
+    renderHands();
     
     if (!isMe) { 
         if (!isOnlineMode) {
