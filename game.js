@@ -21,7 +21,6 @@ animStyles.innerHTML = `
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
     
     .fade-out-stone { opacity: 0 !important; transform: scale(0) !important; transition: all 1s ease-in-out !important; }
-    .fade-out-stone .stone-standee { opacity: 0 !important; transition: opacity 1s ease-in-out !important; }
 
     #time-container-bottom { position: absolute; left: 15px; bottom: 125px; }
     #time-container-top { position: absolute; right: 15px; top: 110px; border-color: #a843ff; box-shadow: 0 0 10px rgba(168,67,255,0.3); flex-direction: column; align-items: center; background: rgba(0,0,0,0.7); padding: 4px 10px; clip-path: polygon(20% 0, 80% 0, 100% 25%, 100% 75%, 80% 100%, 20% 100%, 0 75%, 0 25%); z-index: 5; }
@@ -33,31 +32,28 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
-    /* ====== 立ち絵演出用CSS ====== */
+    /* ====== キャラクター画像（盤面用フラット表示） ====== */
     .stone-standee { 
         position: absolute; 
-        bottom: 20%; 
+        top: 0; left: 0;
         width: 100%; 
-        height: 140%; 
+        height: 100%; 
         display: flex; 
         flex-direction: column; 
-        justify-content: flex-end; 
+        justify-content: center; 
         align-items: center; 
         opacity: 0; 
-        transform-origin: bottom center; 
-        transition: all 0.3s ease; 
+        transition: opacity 0.3s ease; 
         z-index: 10; 
         pointer-events: none; 
-        filter: drop-shadow(0 5px 5px rgba(0,0,0,0.5));
     }
+    /* 盤面が斜めになったタイミングのみ表示 */
     #board-container.tilted .stone-standee { 
         opacity: 1; 
-        transform: rotateX(-35deg) translateY(-10px) scale(1.1); 
     }
 `;
 document.head.appendChild(animStyles);
 
-// ====== 中央メッセージ用UI作成 ======
 let msgOverlay = document.createElement('div');
 msgOverlay.id = 'center-msg-overlay';
 msgOverlay.className = 'center-message';
@@ -72,7 +68,6 @@ async function showCenterMessage(msg, typeClass, duration) {
     }
 }
 
-// ====== タイマーUIの動的クローン・分離 ======
 const timeContainer = document.getElementById('time-container');
 if (timeContainer && !document.getElementById('time-container-top')) {
     timeContainer.id = 'time-container-bottom';
@@ -100,8 +95,6 @@ let isHost = false;
 let myDeckChoice = "";
 let isOnlineMode = false;
 let isGameOver = false;
-
-// 連続対戦時の非同期バグ防止用ID
 let currentMatchId = 0; 
 let consecutivePasses = 0; 
 
@@ -134,7 +127,6 @@ let lastGpFlyTs = 0;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// ====== 画像フォールバック読み込み関数（png と PNG の混同対策） ======
 function applyCardImage(element, cardId) {
     if (!cardId) return;
     const id = String(cardId).trim();
@@ -159,7 +151,6 @@ function applyCardImage(element, cardId) {
     img.src = path1;
 }
 
-// 立ち絵（スタンディ）用の読み込み関数
 function applyStandeeImage(element, cardId) {
     if (!cardId) return;
     const id = String(cardId).trim();
@@ -171,7 +162,7 @@ function applyStandeeImage(element, cardId) {
         element.style.backgroundImage = `url('${path1}')`;
         element.style.backgroundSize = 'contain';
         element.style.backgroundRepeat = 'no-repeat';
-        element.style.backgroundPosition = 'bottom center';
+        element.style.backgroundPosition = 'center';
     };
     img.onerror = () => {
         const img2 = new Image();
@@ -179,17 +170,15 @@ function applyStandeeImage(element, cardId) {
             element.style.backgroundImage = `url('${path2}')`;
             element.style.backgroundSize = 'contain';
             element.style.backgroundRepeat = 'no-repeat';
-            element.style.backgroundPosition = 'bottom center';
+            element.style.backgroundPosition = 'center';
         };
         img2.src = path2;
     };
     img.src = path1;
 }
 
-// ====== ゲーム状態の完全リセット ======
 function resetGameState() {
     currentMatchId++; 
-    
     if (currentRoomId) {
         db.ref('rooms/' + currentRoomId).off();
         currentRoomId = null;
@@ -214,8 +203,6 @@ function resetGameState() {
     msgOverlay.classList.remove('show');
     document.querySelectorAll('.damage-popup').forEach(e => e.remove());
     document.querySelectorAll('.gp-fly-particle').forEach(e => e.remove());
-    document.querySelectorAll('.stone').forEach(e => e.classList.remove('fade-out-stone'));
-    document.querySelectorAll('.stone-standee').forEach(e => e.classList.remove('fade-out-stone'));
     boardElement.innerHTML = '';
     if (svgGroup) svgGroup.innerHTML = '';
     document.getElementById('hand-top').innerHTML = '';
@@ -535,6 +522,7 @@ function checkCostStatus(card, playerColor) {
 }
 
 function checkAbilityMet(card, index, flippable, playerColor) {
+    if (card.stolen) return false; // 盗まれたカードは能力使用不可
     if (!card.ability || !card.ability.text) return true;
     const text = card.ability.text;
     let met = true;
@@ -590,6 +578,9 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
     let selectableCards = nonNullCards;
     if (filterType === 'character' || filterType === 'debuff') {
         selectableCards = nonNullCards.filter(c => c.type === 'character');
+    } else if (filterType === 'steal_a087') {
+        // 極意：コスト5以下のキャラ限定
+        selectableCards = nonNullCards.filter(c => c.type === 'character' && (c.cost.specific + c.cost.free) <= 5);
     }
 
     if (actingPlayer === myColor) {
@@ -629,7 +620,7 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             const isSelectable = selectableCards.includes(card);
             const el = document.createElement('div');
             
-            if (targetPlayer === myColor || filterType === 'debuff') {
+            if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a087') {
                 el.className = `hand-card card-${card.type}`;
                 applyCardImage(el, card.id);
                 
@@ -989,21 +980,22 @@ async function playActionCard(index) {
     if (isOnlineMode) pushGameStateToFirebase();
     await sleep(300);
 
-    let debuffList = []; let buffTargets = []; let handsChanged = false;
+    let debuffList = []; let buffTargets = []; let handsChanged = false; let buffLog = false;
     const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
+    const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
 
     if (id === "A043") {
         buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-        buffTargets.forEach(c => { c.atk += 7; handsChanged = true; });
+        buffTargets.forEach(c => { c.atk += 7; handsChanged = true; buffLog = true; });
     }
     else if (id === "A044") {
         const chars = hand.filter(c => c && c.type === 'character');
         buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
-        buffTargets.forEach(c => { c.atk += 5; handsChanged = true; });
+        buffTargets.forEach(c => { c.atk += 5; handsChanged = true; buffLog = true; });
     }
     else if (id === "A039") {
         buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-        buffTargets.forEach(c => { c.atk += 3; handsChanged = true; });
+        buffTargets.forEach(c => { c.atk += 3; handsChanged = true; buffLog = true; });
     }
     else if (id === "A040") {
         const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
@@ -1023,14 +1015,14 @@ async function playActionCard(index) {
     }
     else if (id === "A042") {
         const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 2; handsChanged = true; });
+        deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 2; handsChanged = true; buffLog = true; });
     }
     else if (id === "A152") {
-        hand.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; });
+        hand.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; buffLog = true; });
     }
     else if (id === "A198") {
         const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; });
+        deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; buffLog = true; });
     }
     else if (id === "A199") {
         for (let c of preSelectedCards) {
@@ -1046,14 +1038,29 @@ async function playActionCard(index) {
     else if (id === "A087") {
         await animateGPFly(14, currentPlayer, '幻影旅団');
         playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        const chars = oppHand.filter(c => c && c.type === 'character');
-        if (chars.length > 0) {
-            const target = chars[Math.floor(Math.random() * chars.length)];
-            target.atk = Math.max(0, target.atk - 4);
-            logDisplay.textContent = `相手の手札のATKを-4!`;
-            handsChanged = true;
+        
+        let selectedCards = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を盗むキャラを選択（コスト5以下）', 'steal_a087');
+        
+        let chrolloCard = getCardById("0141");
+        if (!chrolloCard) chrolloCard = { id: "0141", type: "character", name: "クロロ", rank: "S", cost: { specific: 0, free: 0 }, atk: 10, group: "幻影旅団" };
+
+        if (selectedCards.length > 0) {
+            let target = selectedCards[0];
+            chrolloCard.atk = 30;
+            chrolloCard.ability = target.ability;
+            chrolloCard.combo = target.combo;
+            
+            target.ability = null;
+            target.combo = null;
+            target.stolen = true; 
+            
+            logDisplay.textContent = `🃏相手の能力を盗んだ！`;
+        } else {
+            logDisplay.textContent = `🃏盗む対象がいなかった...`;
         }
+        
+        hand[index] = chrolloCard;
+        handsChanged = true;
     }
     else if (id === "A082") {
         const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
@@ -1149,7 +1156,11 @@ async function playActionCard(index) {
         drawCards(currentPlayer, 1); handsChanged = true;
     }
     
-    if (handsChanged) renderHands();
+    if (handsChanged) {
+        if (buffLog) logDisplay.textContent = `⚡手札に効果適用！`;
+        renderHands();
+    }
+
     updateHPUI(); updateHighlightsAndLines();
     window.isBoardSelecting = false;
     
@@ -1281,9 +1292,11 @@ async function animateGPFly(startIndex, playerColor, group, broadcast = true) {
 async function executeCombat(index, playerColor, finalCard, result) {
     const targetPlayer = playerColor === 'yellow' ? 'purple' : 'yellow';
 
+    let hasOpponentCharFlipped = false;
     result.flippable.forEach(idx => {
         const tc = boardData[idx];
         if (tc && tc.type === 'character') { 
+            if (tc.color !== playerColor) hasOpponentCharFlipped = true;
             if (tc.color === 'yellow') discardYellow.push(tc); 
             else discardPurple.push(tc); 
         }
@@ -1342,6 +1355,37 @@ async function executeCombat(index, playerColor, finalCard, result) {
         const nMatch = text.match(/念ダメージを(\d+)/);
         if (sMatch) abilityDamage += parseInt(sMatch[1]);
         if (nMatch) abilityDamage += parseInt(nMatch[1]);
+
+        if (finalCard.id === "0183") {
+            if (hasOpponentCharFlipped) {
+                abilityDamage += 5;
+            }
+        }
+        
+        if (finalCard.id === "0075") {
+            let surroundingOpponentChars = [];
+            const cx = index % boardSize; 
+            const cy = Math.floor(index / boardSize);
+            for (const [dx, dy] of directions) {
+                let nx = cx + dx; let ny = cy + dy;
+                if (nx >= 0 && nx < boardSize && ny >= 0 && ny < boardSize) {
+                    let sIdx = ny * boardSize + nx;
+                    let sCard = boardData[sIdx];
+                    if (sCard && sCard.type === 'character' && sCard.color === targetPlayer) {
+                        surroundingOpponentChars.push(sIdx);
+                    }
+                }
+            }
+            if (surroundingOpponentChars.length > 0) {
+                let targetIdx = surroundingOpponentChars[Math.floor(Math.random() * surroundingOpponentChars.length)];
+                boardData[targetIdx] = { color: targetPlayer, type: 'stone', name: '' };
+                logDisplay.textContent = `💥ウボォーギンの能力！キャラを破壊！`;
+                renderBoard();
+                if (isOnlineMode) pushGameStateToFirebase();
+                await sleep(400);
+                abilityDamage += 13;
+            }
+        }
 
         if (finalCard.id === "0003") {
             activeEffects.push({ player: playerColor, type: 'leorio_buff', amount: 2, turnsLeft: 3 });
@@ -1430,58 +1474,6 @@ async function executeCombat(index, playerColor, finalCard, result) {
     return false;
 }
 
-// ====== 手札のバフデバフ一括反映処理 ======
-async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, finalCard) {
-    const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
-    let handsChanged = false;
-    let buffLog = false;
-
-    for (let c of discardList) {
-        await animateHandCard(c, currentPlayer, 'card-discard-anim');
-        activeHand[activeHand.indexOf(c)] = null;
-        if (currentPlayer === 'yellow') discardYellow.push(c); else discardPurple.push(c);
-        handsChanged = true;
-    }
-    for (let c of returnList) {
-        await animateHandCard(c, currentPlayer, 'card-return-anim');
-        activeHand[activeHand.indexOf(c)] = null;
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.push(c); shuffleDeck(deck);
-        handsChanged = true;
-    }
-
-    // レオリオなどの効果もここで一括合算
-    for (let i = 0; i < activeEffects.length; i++) {
-        let effect = activeEffects[i];
-        if (effect.type === 'leorio_buff' && effect.player === currentPlayer) {
-            const chars = activeHand.filter(c => c && c.type === 'character');
-            if (chars.length > 0) {
-                const target = chars[Math.floor(Math.random() * chars.length)];
-                target.atk += effect.amount;
-                handsChanged = true;
-                buffLog = true;
-            }
-            effect.turnsLeft--;
-        }
-    }
-    activeEffects = activeEffects.filter(e => e.turnsLeft > 0);
-
-    for (let c of debuffList) { c.atk = Math.max(0, c.atk - 10); handsChanged = true; buffLog = true; }
-    for (let c of buffTargets) {
-        if (finalCard && finalCard.id === "0002") c.atk += 3;
-        if (finalCard && (finalCard.id === "0031" || finalCard.id === "0028")) c.atk += 5;
-        handsChanged = true;
-        buffLog = true;
-    }
-
-    if (handsChanged) {
-        if (buffLog) logDisplay.textContent = `⚡手札に効果適用！`;
-        renderHands();
-        if (isOnlineMode) pushGameStateToFirebase();
-        await sleep(500);
-    }
-}
-
 // ====== ゲームオーバー処理 ======
 async function handleGameOver() {
     if (isGameOver) return;
@@ -1541,6 +1533,57 @@ function checkGameOverAndChangeTurn() {
     }
     currentPlayer = currentPlayer === 'yellow' ? 'purple' : 'yellow'; 
     startTurn();
+}
+
+// ====== 手札の一括反映処理 ======
+async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, finalCard) {
+    const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
+    let handsChanged = false;
+    let buffLog = false;
+
+    for (let c of discardList) {
+        await animateHandCard(c, currentPlayer, 'card-discard-anim');
+        activeHand[activeHand.indexOf(c)] = null;
+        if (currentPlayer === 'yellow') discardYellow.push(c); else discardPurple.push(c);
+        handsChanged = true;
+    }
+    for (let c of returnList) {
+        await animateHandCard(c, currentPlayer, 'card-return-anim');
+        activeHand[activeHand.indexOf(c)] = null;
+        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+        deck.push(c); shuffleDeck(deck);
+        handsChanged = true;
+    }
+
+    for (let i = 0; i < activeEffects.length; i++) {
+        let effect = activeEffects[i];
+        if (effect.type === 'leorio_buff' && effect.player === currentPlayer) {
+            const chars = activeHand.filter(c => c && c.type === 'character');
+            if (chars.length > 0) {
+                const target = chars[Math.floor(Math.random() * chars.length)];
+                target.atk += effect.amount;
+                handsChanged = true;
+                buffLog = true;
+            }
+            effect.turnsLeft--;
+        }
+    }
+    activeEffects = activeEffects.filter(e => e.turnsLeft > 0);
+
+    for (let c of debuffList) { c.atk = Math.max(0, c.atk - 10); handsChanged = true; buffLog = true; }
+    for (let c of buffTargets) {
+        if (finalCard && finalCard.id === "0002") c.atk += 3;
+        if (finalCard && (finalCard.id === "0031" || finalCard.id === "0028")) c.atk += 5;
+        handsChanged = true;
+        buffLog = true;
+    }
+
+    if (handsChanged) {
+        if (buffLog) logDisplay.textContent = `⚡手札に効果適用！`;
+        renderHands();
+        if (isOnlineMode) pushGameStateToFirebase();
+        await sleep(500);
+    }
 }
 
 // ====== 盤面への石置きメイン関数 ======
@@ -1640,6 +1683,7 @@ async function placeStone(index) {
     }
 }
 
+// ====== タイマー管理機能 ======
 function startTurnTimer() {
     if (timerId) clearInterval(timerId); 
     const isMe = currentPlayer === myColor; 
@@ -1694,7 +1738,6 @@ function startTurn() {
     
     const isMe = currentPlayer === myColor; 
     
-    // 【パス判定】
     let canMove = false;
     for (let i = 0; i < 36; i++) {
         if (getFlippableAndTriggers(i, currentPlayer).flippable.length > 0) {
@@ -1845,12 +1888,7 @@ function renderBoard() {
                 standeeImg.style.height = '100%';
                 applyStandeeImage(standeeImg, boardData[i].id);
 
-                const nameLabel = document.createElement('div');
-                nameLabel.style.cssText = "background:rgba(0,0,0,0.6); color:#fff; border:1px solid #fff; border-radius:3px; padding:2px; font-size:8px; white-space:nowrap; position:absolute; bottom:-10px;";
-                nameLabel.textContent = boardData[i].name;
-
                 standee.appendChild(standeeImg);
-                standee.appendChild(nameLabel);
                 stone.appendChild(standee); 
             }
 
