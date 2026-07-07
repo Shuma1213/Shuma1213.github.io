@@ -51,7 +51,7 @@ animStyles.innerHTML = `
     }
     #board-container.tilted .stone-standee { 
         opacity: 1; 
-        transform: rotateX(-5deg) translateY(-15px) scale(1.1); 
+        transform: rotateX(20deg) translateY(-15px) scale(1.1); 
         transform-origin: bottom center;
     }
 
