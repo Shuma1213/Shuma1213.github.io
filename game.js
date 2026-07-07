@@ -254,7 +254,7 @@ let lastDamageAnimTs = 0;
 let lastDamageRedTs = 0;
 let lastGpFlyTs = 0;
 
-const selfDamageIds = ["0091", "0103", "0104", "0105", "0112", "0117", "0164"];
+const selfDamageIds = ["0091", "0103", "0104", "0105", "0112", "0117", "0164", "0101"];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -344,11 +344,14 @@ function resetGameState() {
 }
 
 function getCardById(idStr) {
+    if (typeof CARD_DATABASE === 'undefined') {
+        console.error("CARD_DATABASE is not defined! Ensure card.js is loaded before game.js.");
+        return null;
+    }
     const card = CARD_DATABASE.find(c => c.id === idStr);
     return card ? JSON.parse(JSON.stringify({ ...card, original_atk: card.atk })) : null;
 }
 
-// デッキの内訳を更新
 function buildFixedDeck(deckType) {
     let deck = [];
     let ids = deckType === '287期受験生' ? 
@@ -716,6 +719,10 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
         selectableCards = nonNullCards.filter(c => c.type === 'character' && (c.cost.specific + c.cost.free) <= 5);
     } else if (filterType === 'discard_0100') {
         selectableCards = nonNullCards.filter(c => c && (c.cost.specific + c.cost.free) === 4);
+    } else if (filterType === 'discard_a127') {
+        selectableCards = nonNullCards.filter(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) <= 1);
+    } else if (filterType === 'discard_a128') {
+        selectableCards = nonNullCards.filter(c => c && (c.cost.specific + c.cost.free) <= 5);
     }
 
     if (actingPlayer === myColor) {
@@ -759,7 +766,7 @@ async function selectHandCardsTarget(actingPlayer, targetPlayer, count, message,
             const isSelectable = selectableCards.includes(card);
             const el = document.createElement('div');
             
-            if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a054' || filterType === 'seal_0140' || filterType === 'discard_0100') {
+            if (targetPlayer === myColor || filterType === 'debuff' || filterType === 'steal_a054' || filterType === 'seal_0140' || filterType === 'discard_0100' || filterType === 'discard_a127' || filterType === 'discard_a128') {
                 el.className = `hand-card card-${card.type}`;
                 applyCardImage(el, card.id); 
                 
@@ -1152,7 +1159,6 @@ async function playActionCard(index) {
     const id = card.id;
     let preSelectedCards = [];
     
-    // アクション発動前の手札選択（A199, A204）
     if (id === "A199" || id === "A204") { 
         preSelectedCards = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
     }
@@ -1166,7 +1172,7 @@ async function playActionCard(index) {
     if (isOnlineMode) pushGameStateToFirebase();
     await sleep(300);
 
-    // --- 1. アクション使用時の「制約」処理 ---
+    // --- 1. 制約の処理 ---
     const selfDamageActionIds = ["A126", "A129", "A125", "A202"];
     if (selfDamageActionIds.includes(id)) {
         let { finalDamage: sDmg } = applyDamageReduction(2, 'special', currentPlayer);
@@ -1175,7 +1181,6 @@ async function playActionCard(index) {
         logDisplay.textContent = `⚡[制約] 特殊ダメージを受けた！`;
         updateHPUI();
         await sleep(300);
-        // HPが0になったらその時点で敗北
         if (hpYellow <= 0 || hpPurple <= 0) {
             if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
             await handleGameOver();
@@ -1184,7 +1189,7 @@ async function playActionCard(index) {
         }
     }
 
-    // --- 2. アクション使用時の「誓約」条件チェック ---
+    // --- 2. 誓約の処理 ---
     const vowActionIds = ["A130", "A128"];
     let vowFailed = false;
     if (vowActionIds.includes(id)) {
@@ -1201,7 +1206,6 @@ async function playActionCard(index) {
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
     const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
 
-    // --- 3. 誓約をクリアした場合のみ能力を発動 ---
     if (!vowFailed) {
         if (id === "A043") {
             buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
@@ -1378,7 +1382,6 @@ async function playActionCard(index) {
                 }
             }
         }
-        // 以下、追加されたマフィアンアクション
         else if (id === "A126") {
             let { finalDamage: aFinalDmg, reduction: aRed } = applyDamageReduction(6, 'special', opponentColor);
             if (aRed > 0) await showDamageAnimationReduction(aRed, aFinalDmg, opponentColor);
@@ -1528,6 +1531,9 @@ function applyDamageReduction(damage, dmgType, targetPlayer) {
                 totalReduction += 1;
             }
         }
+        if (c && (c.id === "0061" || c.id === "0077") && c.color === targetPlayer && dmgType === 'normal' && window.isBoardSelecting) {
+            // 防御効果は盤面計算時に適用されるためここでは除外する（二重軽減防止）
+        }
     });
 
     activeEffects.forEach(effect => {
@@ -1638,7 +1644,7 @@ async function executeCombat(index, playerColor, finalCard, result) {
         if (tc && tc.type === 'character') { 
             if (tc.color !== playerColor) {
                 hasOpponentCharFlipped = true;
-                if (tc.id === "0061" || tc.id === "0077") flipDefReduction += 5;
+                if (tc.id === "0061" || tc.id === "0077" || tc.id === "0089") flipDefReduction += 5;
                 if (tc.group !== '幻影旅団') hasNonTroupeFlipped = true;
             }
             if (tc.color === 'yellow') discardYellow.push(tc); 
@@ -1711,10 +1717,22 @@ async function executeCombat(index, playerColor, finalCard, result) {
         const nMatch = text.match(/念ダメージを(\d+)/);
         
         if (sMatch && !selfDamageIds.includes(abilityId)) abilityDamage += parseInt(sMatch[1]);
-        if (nMatch && !["0075", "0183", "0159"].includes(abilityId)) abilityDamage += parseInt(nMatch[1]);
+        if (nMatch && !["0075", "0183", "0159", "0114", "0166"].includes(abilityId)) abilityDamage += parseInt(nMatch[1]);
 
         if (abilityId === "0183" && hasOpponentCharFlipped) abilityDamage += 5;
         if (abilityId === "0159" && hasOpponentCharFlipped) abilityDamage += 5;
+        if (abilityId === "0108" && hasOpponentCharFlipped) {
+            let flippedTroupe = false;
+            result.flippable.forEach(idx => {
+                const tc = boardData[idx];
+                if (tc && tc.group === '幻影旅団') flippedTroupe = true;
+            });
+            if (flippedTroupe) abilityDamage += 10;
+        }
+
+        const myHp = playerColor === 'yellow' ? hpYellow : hpPurple;
+        if (abilityId === "0114" && myHp <= 60) abilityDamage += 5;
+        if (abilityId === "0166" && myHp <= 60) abilityDamage += 10;
         
         if (abilityId === "0197") {
             let count = boardData.filter(c => c && c.group === 'マフィアンコミュニティー' && c.color === playerColor).length;
@@ -1745,8 +1763,11 @@ async function executeCombat(index, playerColor, finalCard, result) {
         if (abilityId === "0053") activeEffects.push({ player: playerColor, type: 'feitan_debuff', turnsLeft: 3, index: index, cardId: abilityId });
         if (abilityId === "0057") activeEffects.push({ player: playerColor, type: 'shalnark_debuff', turnsLeft: 3, index: index, cardId: abilityId });
         if (abilityId === "0063") activeEffects.push({ player: playerColor, type: 'machi_heal', turnsLeft: 3, index: index, cardId: abilityId });
+        if (abilityId === "0119") activeEffects.push({ player: playerColor, type: 'senritsu_heal', turnsLeft: 3, index: index, cardId: abilityId });
+        if (abilityId === "0096" || abilityId === "0106") activeEffects.push({ player: playerColor, type: 'slip_damage', amount: 2, turnsLeft: 3, index: index, cardId: abilityId });
         if (abilityId === "0131") activeEffects.push({ player: playerColor, type: 'reduce_damage_taken', amount: 10, turnsLeft: 1, index: index, cardId: abilityId });
-        
+        if (abilityId === "0116") activeEffects.push({ player: playerColor, type: 'reduce_damage_normal', amount: 3, turnsLeft: 3, index: index, cardId: abilityId });
+
         const hMatch = text.match(/HPを(\d+)回復/);
         if (hMatch && result.flippable.length >= 2) {
             const heal = parseInt(hMatch[1]);
@@ -1777,6 +1798,25 @@ async function executeCombat(index, playerColor, finalCard, result) {
                 const act = deck.splice(actionIdx, 1)[0];
                 deck.push(act);
                 logDisplay.textContent = `⚡デッキからアクションを仕込んだ！`;
+            }
+        }
+        
+        if (abilityId === "0098") {
+            const myEmptyIndices = boardData.map((c, i) => (c && c.type === 'stone' && c.color === playerColor) ? i : -1).filter(i => i !== -1);
+            if (myEmptyIndices.length > 0) {
+                // 最大11枚まで風船黒子に変える
+                const targetCount = Math.min(11, myEmptyIndices.length);
+                const targets = myEmptyIndices.sort(() => 0.5 - Math.random()).slice(0, targetCount);
+                const spawnCard = { id: "0100", type: "character", group: "マフィアンコミュニティー", name: "風船黒子", rank: "B", cost: { specific: 0, free: 0 }, atk: 5 }; // 仮IDとステータス
+                
+                targets.forEach(tIdx => {
+                    spawnCard.color = playerColor;
+                    boardData[tIdx] = JSON.parse(JSON.stringify(spawnCard));
+                });
+                logDisplay.textContent = `⚡空のカードが「風船黒子」に変わった！`;
+                renderBoard();
+                if (isOnlineMode) pushGameStateToFirebase();
+                await sleep(500);
             }
         }
 
@@ -2016,6 +2056,23 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
                 if (currentPlayer === 'yellow') hpYellow += 2; else hpPurple += 2;
                 updateHPUI();
                 logDisplay.textContent = `⚡回復効果適用！`;
+            } else if (effect.type === 'senritsu_heal') {
+                if (currentPlayer === 'yellow') hpYellow += 3; else hpPurple += 3;
+                updateHPUI();
+                logDisplay.textContent = `⚡回復効果適用！`;
+            } else if (effect.type === 'slip_damage') {
+                // 自分と相手両方にダメージ
+                let { finalDamage: sDmg } = applyDamageReduction(effect.amount, 'special', currentPlayer);
+                if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
+                if (sDmg > 0) await showDamageAnimation(`-${sDmg}`, currentPlayer, 'normal');
+                
+                let { finalDamage: oDmg } = applyDamageReduction(effect.amount, 'special', opponentColor);
+                if (opponentColor === 'yellow') hpYellow -= oDmg; else hpPurple -= oDmg;
+                if (oDmg > 0) await showDamageAnimation(`-${oDmg}`, opponentColor, 'normal');
+                
+                logDisplay.textContent = `⚡[継続] 念ダメージ！`;
+                updateHPUI();
+                await sleep(300);
             }
             effect.turnsLeft--;
         }
@@ -2036,122 +2093,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
         renderHands();
         if (isOnlineMode) pushGameStateToFirebase();
         await sleep(500);
-    }
-}
-
-async function placeStone(index) {
-    if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
-    const result = getFlippableAndTriggers(index, currentPlayer);
-    if (result.flippable.length === 0) return;
-    
-    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
-    const selectedCard = hand[window.selectedHandIndex];
-    if (!selectedCard) return;
-
-    window.isBoardSelecting = true;
-    
-    hand[window.selectedHandIndex] = null;
-    window.selectedHandIndex = null;
-    boardContainer.classList.add('tilted');
-    document.querySelectorAll('.highlight-box').forEach(el => el.remove());
-    if (svgGroup) svgGroup.innerHTML = '';
-    
-    boardData[index] = { ...selectedCard, color: currentPlayer };
-    renderBoard();
-    renderHands();
-    if (isOnlineMode) pushGameStateToFirebase();
-
-    try {
-        const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
-        const costStatus = checkCostStatus(selectedCard, currentPlayer);
-        let triggerMet = checkAbilityMet(selectedCard, index, result.flippable, currentPlayer);
-        
-        let finalCard = { ...selectedCard, color: currentPlayer };
-        
-        if (costStatus !== 'OK') {
-            finalCard.combo = null; 
-            finalCard.ability = null; 
-            result.triggers = [];
-            let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
-            let buffAmount = selectedCard.atk - orig;
-            if (isNaN(buffAmount)) buffAmount = 0;
-            finalCard.atk = Math.max(0, 1 + buffAmount); 
-        } else if (!triggerMet) {
-            finalCard.ability = null;
-        }
-
-        boardData[index] = finalCard;
-        await sleep(500);
-
-        let discardList = []; let returnList = []; let debuffList = []; let buffTargets = []; let sealTargets = [];
-
-        const abilityId = finalCard.stolenFromId || finalCard.id;
-
-        if (costStatus === 'OK' && triggerMet) {
-            if (abilityId === "0004" || abilityId === "0010" || abilityId === "0091" || abilityId === "0105") {
-                discardList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
-            }
-            if (abilityId === "0046" || abilityId === "0048" || abilityId === "0059" || abilityId === "0068") {
-                returnList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
-            }
-            if (abilityId === "0140") {
-                sealTargets = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を封じる相手の手札を選択', 'character');
-            }
-            if (abilityId === "0070") {
-                debuffList = await selectHandCardsTarget(currentPlayer, opponentColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
-            }
-            if (abilityId === "0002" || abilityId === "0031") {
-                buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-            }
-            if (abilityId === "0028") {
-                const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
-                const chars = activeHand.filter(c => c && c.type === 'character');
-                buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
-            }
-            
-            if (selfDamageIds.includes(abilityId)) {
-                let { finalDamage: sDmg, reduction: sRed } = applyDamageReduction(2, 'special', currentPlayer);
-                if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
-                if (sDmg > 0) await showDamageAnimation(`-${sDmg}`, currentPlayer, 'normal');
-                logDisplay.textContent = `⚡[制約] 特殊ダメージを受けた！`;
-                updateHPUI();
-                await sleep(300);
-                if (hpYellow <= 0 || hpPurple <= 0) {
-                    if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
-                    await handleGameOver();
-                    window.isBoardSelecting = false;
-                    return;
-                }
-            }
-        }
-
-        const isGameOverCombat = await executeCombat(index, currentPlayer, finalCard, result);
-        if (isGameOverCombat) {
-            if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
-            await handleGameOver();
-            window.isBoardSelecting = false;
-            return;
-        }
-
-        await applyPendingChanges(discardList, returnList, debuffList, buffTargets, sealTargets, finalCard);
-
-    } catch (error) {
-        console.error("Combat Error:", error);
-    } finally {
-        window.isBoardSelecting = false;
-        
-        if (!isOnlineMode) {
-            checkGameOverAndChangeTurn();
-        } else {
-            if (hpYellow <= 0 || hpPurple <= 0 || !boardData.some(c => c === null)) {
-                if (!isGameOver) {
-                    pushGameStateToFirebase(currentPlayer);
-                    handleGameOver();
-                }
-            } else if (currentPlayer === myColor) {
-                pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
-            }
-        }
     }
 }
 
@@ -2251,6 +2192,21 @@ function startTurn() {
                                 updateHPUI();
                                 effect.turnsLeft--;
                             }
+                            if (effect.type === 'senritsu_heal') {
+                                if (currentPlayer === 'yellow') hpYellow += 3; else hpPurple += 3;
+                                updateHPUI();
+                                effect.turnsLeft--;
+                            }
+                            if (effect.type === 'slip_damage') {
+                                let { finalDamage: sDmg } = applyDamageReduction(effect.amount, 'special', currentPlayer);
+                                if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
+                                
+                                let { finalDamage: oDmg } = applyDamageReduction(effect.amount, 'special', opponentColor);
+                                if (opponentColor === 'yellow') hpYellow -= oDmg; else hpPurple -= oDmg;
+                                
+                                updateHPUI();
+                                effect.turnsLeft--;
+                            }
                             if (effect.type === 'feitan_debuff') {
                                 const chars = oppHand.filter(c => c && c.type === 'character');
                                 if (chars.length > 0) {
@@ -2306,6 +2262,21 @@ function startTurn() {
             if (effect.turnsLeft > 0) {
                 if (effect.type === 'machi_heal') {
                     if (opponentColor === 'yellow') hpYellow += 2; else hpPurple += 2;
+                    updateHPUI();
+                    effect.turnsLeft--;
+                }
+                if (effect.type === 'senritsu_heal') {
+                    if (opponentColor === 'yellow') hpYellow += 3; else hpPurple += 3;
+                    updateHPUI();
+                    effect.turnsLeft--;
+                }
+                if (effect.type === 'slip_damage') {
+                    let { finalDamage: sDmg } = applyDamageReduction(effect.amount, 'special', opponentColor);
+                    if (opponentColor === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
+                    
+                    let { finalDamage: oDmg } = applyDamageReduction(effect.amount, 'special', currentPlayer);
+                    if (currentPlayer === 'yellow') hpYellow -= oDmg; else hpPurple -= oDmg;
+                    
                     updateHPUI();
                     effect.turnsLeft--;
                 }
