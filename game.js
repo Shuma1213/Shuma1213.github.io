@@ -944,7 +944,7 @@ function createCardElementUI(card, index, playerColor, isHandCard = true) {
     return el;
 }
 
-function updateHighlightsAndLines() {
+ updateHighlightsAndLines() {
     document.querySelectorAll('.highlight-box:not(.target-hl)').forEach(el => el.remove());
     if (svgGroup) svgGroup.innerHTML = '';
     
@@ -1152,7 +1152,8 @@ async function playActionCard(index) {
     const id = card.id;
     let preSelectedCards = [];
     
-    if (id === "A199") { 
+    // アクション発動前の手札選択（A199, A204）
+    if (id === "A199" || id === "A204") { 
         preSelectedCards = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
     }
     
@@ -1165,198 +1166,321 @@ async function playActionCard(index) {
     if (isOnlineMode) pushGameStateToFirebase();
     await sleep(300);
 
+    // --- 1. アクション使用時の「制約」処理 ---
+    const selfDamageActionIds = ["A126", "A129", "A125", "A202"];
+    if (selfDamageActionIds.includes(id)) {
+        let { finalDamage: sDmg } = applyDamageReduction(2, 'special', currentPlayer);
+        if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
+        if (sDmg > 0) await showDamageAnimation(`-${sDmg}`, currentPlayer, 'normal');
+        logDisplay.textContent = `⚡[制約] 特殊ダメージを受けた！`;
+        updateHPUI();
+        await sleep(300);
+        // HPが0になったらその時点で敗北
+        if (hpYellow <= 0 || hpPurple <= 0) {
+            if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
+            await handleGameOver();
+            window.isBoardSelecting = false;
+            return;
+        }
+    }
+
+    // --- 2. アクション使用時の「誓約」条件チェック ---
+    const vowActionIds = ["A130", "A128"];
+    let vowFailed = false;
+    if (vowActionIds.includes(id)) {
+        const myHp = currentPlayer === 'yellow' ? hpYellow : hpPurple;
+        if (myHp > 60) {
+            logDisplay.textContent = `⚡[誓約] 条件を満たしていないため不発！`;
+            vowFailed = true;
+            await sleep(1000);
+        }
+    }
+
     let debuffList = []; let buffTargets = []; let handsChanged = false; let buffLog = false;
-    let abilityIdForPending = null;
     const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
+    const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
 
-    if (id === "A043") {
-        buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-        buffTargets.forEach(c => { c.atk += 7; handsChanged = true; buffLog = true; });
-    }
-    else if (id === "A044") {
-        const chars = hand.filter(c => c && c.type === 'character');
-        buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
-        buffTargets.forEach(c => { c.atk += 5; handsChanged = true; buffLog = true; });
-    }
-    else if (id === "A039") {
-        buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-        buffTargets.forEach(c => { c.atk += 3; handsChanged = true; buffLog = true; });
-    }
-    else if (id === "A040") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        const idx = deck.findIndex(c => c && c.group === '287期受験生' && c.type === 'character');
-        if (idx !== -1) {
-            const drawnCard = deck.splice(idx, 1)[0];
-            drawnCard.atk += 5;
-            const emptyIdx = hand.indexOf(null);
-            if (emptyIdx !== -1) hand[emptyIdx] = drawnCard;
-            else deck.push(drawnCard);
-            handsChanged = true;
+    // --- 3. 誓約をクリアした場合のみ能力を発動 ---
+    if (!vowFailed) {
+        if (id === "A043") {
+            buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+            buffTargets.forEach(c => { c.atk += 7; handsChanged = true; buffLog = true; });
         }
-    }
-    else if (id === "A041") {
-        if (currentPlayer === 'yellow') hpYellow += 7; else hpPurple += 7;
-        await showDamageAnimation(`回復 7`, currentPlayer, 'heal');
-    }
-    else if (id === "A042") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 2; handsChanged = true; buffLog = true; });
-    }
-    else if (id === "A152") {
-        hand.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; buffLog = true; });
-    }
-    else if (id === "A198") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; buffLog = true; });
-    }
-    else if (id === "A199") {
-        for (let c of preSelectedCards) {
-            await animateHandCard(c, currentPlayer, 'card-discard-anim');
-            hand[hand.indexOf(c)] = null;
-            if (currentPlayer === 'yellow') discardYellow.push(c); else discardPurple.push(c);
-            handsChanged = true;
+        else if (id === "A044") {
+            const chars = hand.filter(c => c && c.type === 'character');
+            buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
+            buffTargets.forEach(c => { c.atk += 5; handsChanged = true; buffLog = true; });
         }
-    }
-    else if (id === "A158") {
-        drawCards(currentPlayer, 1); handsChanged = true;
-    }
-    else if (id === "A054") {
-        await animateGPFly(14, currentPlayer, '幻影旅団');
-        playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
-        
-        let selectedCards = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を盗むキャラを選択（コスト5以下）', 'steal_a054');
-        
-        let chrolloCard = getCardById("0141");
-        if (!chrolloCard) chrolloCard = { id: "0141", type: "character", name: "クロロ", rank: "S", cost: { specific: 0, free: 0 }, atk: 10, group: "幻影旅団" };
-
-        if (selectedCards.length > 0) {
-            let target = selectedCards[0];
-            chrolloCard.atk = 30;
-            chrolloCard.ability = target.ability;
-            chrolloCard.combo = target.combo;
-            chrolloCard.stolenFromId = target.id; 
-            
-            target.ability = null;
-            target.combo = null;
-            target.stolen = true; 
-            
-            logDisplay.textContent = `🃏相手の能力を盗んだ！`;
-        } else {
-            logDisplay.textContent = `🃏盗む対象がいなかった...`;
+        else if (id === "A039") {
+            buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+            buffTargets.forEach(c => { c.atk += 3; handsChanged = true; buffLog = true; });
         }
-        
-        hand[index] = chrolloCard;
-        handsChanged = true;
-    }
-    else if (id === "A087") {
-        await animateGPFly(14, currentPlayer, '幻影旅団');
-        playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        const chars = oppHand.filter(c => c && c.type === 'character');
-        if (chars.length > 0) {
-            const target = chars[Math.floor(Math.random() * chars.length)];
-            target.atk = Math.max(0, target.atk - 4);
-            logDisplay.textContent = `相手の手札のATKを-4!`;
-            handsChanged = true;
-        }
-    }
-    else if (id === "A082") {
-        const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
-        await animateGPFly(14, currentPlayer, '幻影旅団');
-        playerGP[currentPlayer].gp['幻影旅団'] = beforeGP + 1;
-        if (beforeGP >= 10) {
-            if (currentPlayer === 'yellow') hpYellow += 11; else hpPurple += 11;
-            await showDamageAnimation(`回復 11`, currentPlayer, 'heal');
-        }
-    }
-    else if (id === "A084") {
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        oppHand.filter(c => c && c.type === 'character').forEach(c => {
-            c.atk = Math.max(0, c.atk - 4);
-            handsChanged = true;
-        });
-        logDisplay.textContent = `相手の手札すべてのATKを-4!`;
-        await sleep(500);
-    }
-    else if (id === "A085") {
-        if (currentPlayer === 'yellow') hpYellow += 10; else hpPurple += 10;
-        await showDamageAnimation(`回復 10`, currentPlayer, 'heal');
-    }
-    else if (id === "A086") {
-        const oppCharIndices = [];
-        boardData.forEach((c, idx) => { if (c && c.type === 'character' && c.color === opColor) oppCharIndices.push(idx); });
-        
-        if (oppCharIndices.length === 0) {
-            logDisplay.textContent = '効果対象なし';
-            await sleep(1000);
-        } else {
-            let targetIdx = -1;
-            if (currentPlayer !== myColor) {
-                targetIdx = oppCharIndices[Math.floor(Math.random() * oppCharIndices.length)];
-            } else {
-                logDisplay.textContent = '空にする相手のキャラを選択してください';
-                targetIdx = await selectBoardTarget(oppCharIndices);
-            }
-            if (targetIdx !== -1) {
-                boardData[targetIdx] = { color: opColor, type: 'stone', name: '' };
-                logDisplay.textContent = 'キャラを空のカードにしました';
-                renderBoard();
-                await sleep(500);
-            }
-        }
-    }
-    else if (id === "A083") {
-        const oppHand = currentPlayer === 'yellow' ? handPurple : handYellow;
-        const validTargets = oppHand.filter(c => c && (c.cost.specific + c.cost.free) <= 3);
-        if (validTargets.length === 0) {
-            logDisplay.textContent = '効果対象なし';
-            await sleep(1000);
-        } else {
-            const target = validTargets[Math.floor(Math.random() * validTargets.length)];
-            await animateHandCard(target, opColor, 'card-discard-anim');
-            oppHand[oppHand.indexOf(target)] = null;
-            if (opColor === 'yellow') discardYellow.push(target); else discardPurple.push(target);
-            logDisplay.textContent = `相手のカードを捨てさせた!`;
-            handsChanged = true;
-        }
-    }
-    else if (id === "A163") {
-        const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-        const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) >= 3);
-        if (targetIdx !== -1) {
-            const drawn = deck.splice(targetIdx, 1)[0];
-            const emptyIdx = hand.indexOf(null);
-            if (emptyIdx !== -1) hand[emptyIdx] = drawn;
-            else deck.push(drawn);
-            logDisplay.textContent = 'キャラを引いた!';
-            handsChanged = true;
-        } else {
-            logDisplay.textContent = '効果対象なし';
-        }
-        await sleep(1000);
-    }
-    else if (id === "A200") {
-        const nonNulls = hand.filter(c => c !== null);
-        if (nonNulls.length > 0) {
-            const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
-            if (targets.length > 0) {
-                const target = targets[0];
-                await animateHandCard(target, currentPlayer, 'card-return-anim');
-                hand[hand.indexOf(target)] = null;
-                const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
-                deck.push(target);
-                shuffleDeck(deck);
+        else if (id === "A040") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            const idx = deck.findIndex(c => c && c.group === '287期受験生' && c.type === 'character');
+            if (idx !== -1) {
+                const drawnCard = deck.splice(idx, 1)[0];
+                drawnCard.atk += 5;
+                const emptyIdx = hand.indexOf(null);
+                if (emptyIdx !== -1) hand[emptyIdx] = drawnCard;
+                else deck.push(drawnCard);
                 handsChanged = true;
             }
         }
+        else if (id === "A041") {
+            if (currentPlayer === 'yellow') hpYellow += 7; else hpPurple += 7;
+            await showDamageAnimation(`回復 7`, currentPlayer, 'heal');
+        }
+        else if (id === "A042") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 2; handsChanged = true; buffLog = true; });
+        }
+        else if (id === "A152") {
+            hand.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; buffLog = true; });
+        }
+        else if (id === "A198") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            deck.filter(c => c && c.type === 'character').forEach(c => { c.atk += 1; handsChanged = true; buffLog = true; });
+        }
+        else if (id === "A199" || id === "A204") {
+            for (let c of preSelectedCards) {
+                await animateHandCard(c, currentPlayer, 'card-discard-anim');
+                hand[hand.indexOf(c)] = null;
+                if (currentPlayer === 'yellow') discardYellow.push(c); else discardPurple.push(c);
+                handsChanged = true;
+            }
+        }
+        else if (id === "A158" || id === "A203") {
+            drawCards(currentPlayer, 1); handsChanged = true;
+        }
+        else if (id === "A054") {
+            await animateGPFly(14, currentPlayer, '幻影旅団');
+            playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
+            
+            let selectedCards = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を盗むキャラを選択（コスト5以下）', 'steal_a054');
+            let chrolloCard = getCardById("0141");
+            if (!chrolloCard) chrolloCard = { id: "0141", type: "character", name: "クロロ", rank: "SS", cost: { specific: 0, free: 0 }, atk: 10, group: "幻影旅団" };
+
+            if (selectedCards.length > 0) {
+                let target = selectedCards[0];
+                chrolloCard.atk = 30;
+                chrolloCard.ability = target.ability;
+                chrolloCard.combo = target.combo;
+                chrolloCard.stolenFromId = target.id; 
+                
+                target.ability = null;
+                target.combo = null;
+                target.stolen = true; 
+                logDisplay.textContent = `🃏相手の能力を盗んだ！`;
+            } else {
+                logDisplay.textContent = `🃏盗む対象がいなかった...`;
+            }
+            hand[index] = chrolloCard;
+            handsChanged = true;
+        }
+        else if (id === "A087") {
+            await animateGPFly(14, currentPlayer, '幻影旅団');
+            playerGP[currentPlayer].gp['幻影旅団'] = (playerGP[currentPlayer].gp['幻影旅団'] || 0) + 1;
+            const chars = oppHand.filter(c => c && c.type === 'character');
+            if (chars.length > 0) {
+                const target = chars[Math.floor(Math.random() * chars.length)];
+                target.atk = Math.max(0, target.atk - 4);
+                logDisplay.textContent = `相手の手札のATKを-4!`;
+                handsChanged = true;
+            }
+        }
+        else if (id === "A082") {
+            const beforeGP = playerGP[currentPlayer].gp['幻影旅団'] || 0;
+            await animateGPFly(14, currentPlayer, '幻影旅団');
+            playerGP[currentPlayer].gp['幻影旅団'] = beforeGP + 1;
+            if (beforeGP >= 10) {
+                if (currentPlayer === 'yellow') hpYellow += 11; else hpPurple += 11;
+                await showDamageAnimation(`回復 11`, currentPlayer, 'heal');
+            }
+        }
+        else if (id === "A084") {
+            oppHand.filter(c => c && c.type === 'character').forEach(c => {
+                c.atk = Math.max(0, c.atk - 4);
+                handsChanged = true;
+            });
+            logDisplay.textContent = `相手の手札すべてのATKを-4!`;
+            await sleep(500);
+        }
+        else if (id === "A085") {
+            if (currentPlayer === 'yellow') hpYellow += 10; else hpPurple += 10;
+            await showDamageAnimation(`回復 10`, currentPlayer, 'heal');
+        }
+        else if (id === "A086") {
+            const oppCharIndices = [];
+            boardData.forEach((c, idx) => { if (c && c.type === 'character' && c.color === opponentColor) oppCharIndices.push(idx); });
+            
+            if (oppCharIndices.length === 0) {
+                logDisplay.textContent = '効果対象なし';
+                await sleep(1000);
+            } else {
+                let targetIdx = -1;
+                if (currentPlayer !== myColor) {
+                    targetIdx = oppCharIndices[Math.floor(Math.random() * oppCharIndices.length)];
+                } else {
+                    logDisplay.textContent = '空にする相手のキャラを選択してください';
+                    targetIdx = await selectBoardTarget(oppCharIndices);
+                }
+                if (targetIdx !== -1) {
+                    boardData[targetIdx] = { color: opponentColor, type: 'stone', name: '' };
+                    logDisplay.textContent = 'キャラを空のカードにしました';
+                    renderBoard();
+                    await sleep(500);
+                }
+            }
+        }
+        else if (id === "A083") {
+            const validTargets = oppHand.filter(c => c && (c.cost.specific + c.cost.free) <= 3);
+            if (validTargets.length === 0) {
+                logDisplay.textContent = '効果対象なし';
+                await sleep(1000);
+            } else {
+                const target = validTargets[Math.floor(Math.random() * validTargets.length)];
+                await animateHandCard(target, opponentColor, 'card-discard-anim');
+                oppHand[oppHand.indexOf(target)] = null;
+                if (opponentColor === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+                logDisplay.textContent = `相手のカードを捨てさせた!`;
+                handsChanged = true;
+            }
+        }
+        else if (id === "A163") {
+            const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            const targetIdx = deck.findIndex(c => c && c.type === 'character' && (c.cost.specific + c.cost.free) >= 3);
+            if (targetIdx !== -1) {
+                const drawn = deck.splice(targetIdx, 1)[0];
+                const emptyIdx = hand.indexOf(null);
+                if (emptyIdx !== -1) hand[emptyIdx] = drawn;
+                else deck.push(drawn);
+                logDisplay.textContent = 'キャラを引いた!';
+                handsChanged = true;
+            } else {
+                logDisplay.textContent = '効果対象なし';
+            }
+            await sleep(1000);
+        }
+        else if (id === "A200") {
+            const nonNulls = hand.filter(c => c !== null);
+            if (nonNulls.length > 0) {
+                const targets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
+                if (targets.length > 0) {
+                    const target = targets[0];
+                    await animateHandCard(target, currentPlayer, 'card-return-anim');
+                    hand[hand.indexOf(target)] = null;
+                    const deck = currentPlayer === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+                    deck.push(target);
+                    shuffleDeck(deck);
+                    handsChanged = true;
+                }
+            }
+        }
+        // 以下、追加されたマフィアンアクション
+        else if (id === "A126") {
+            let { finalDamage: aFinalDmg, reduction: aRed } = applyDamageReduction(6, 'special', opponentColor);
+            if (aRed > 0) await showDamageAnimationReduction(aRed, aFinalDmg, opponentColor);
+            else await showDamageAnimation(`能力 ${aFinalDmg}`, opponentColor);
+            
+            if (currentPlayer === 'yellow') hpPurple -= aFinalDmg; else hpYellow -= aFinalDmg;
+        }
+        else if (id === "A130") {
+            if (currentPlayer === 'yellow') hpYellow += 15; else hpPurple += 15;
+            await showDamageAnimation(`回復 15`, currentPlayer, 'heal');
+        }
+        else if (id === "A127") {
+            const validIndices = [];
+            boardData.forEach((c, idx) => {
+                if (c && c.type === 'character' && c.color === opponentColor && (c.cost.specific + c.cost.free) <= 1) {
+                    validIndices.push(idx);
+                }
+            });
+            if (validIndices.length > 0) {
+                let targetIdx = -1;
+                if (currentPlayer !== myColor) {
+                    targetIdx = validIndices[Math.floor(Math.random() * validIndices.length)];
+                } else {
+                    logDisplay.textContent = '空にする相手のキャラを選択してください';
+                    targetIdx = await selectBoardTarget(validIndices);
+                }
+                if (targetIdx !== -1) {
+                    boardData[targetIdx] = { color: opponentColor, type: 'stone', name: '' };
+                    logDisplay.textContent = 'キャラを空のカードにしました';
+                    renderBoard();
+                    await sleep(500);
+                }
+            } else {
+                logDisplay.textContent = '効果対象なし';
+                await sleep(1000);
+            }
+        }
+        else if (id === "A128") {
+            const validTargets = oppHand.filter(c => c && (c.cost.specific + c.cost.free) <= 5);
+            if (validTargets.length > 0) {
+                const target = validTargets[Math.floor(Math.random() * validTargets.length)];
+                await animateHandCard(target, opponentColor, 'card-discard-anim');
+                oppHand[oppHand.indexOf(target)] = null;
+                if (opponentColor === 'yellow') discardYellow.push(target); else discardPurple.push(target);
+                logDisplay.textContent = `相手のカードを捨てさせた!`;
+                handsChanged = true;
+            }
+        }
+        else if (id === "A129") {
+            const chars = oppHand.filter(c => c && c.type === 'character');
+            if (chars.length > 0) {
+                const target = chars[Math.floor(Math.random() * chars.length)];
+                target.atk = Math.max(0, target.atk - 10);
+                logDisplay.textContent = `相手の手札のATKを-10!`;
+                handsChanged = true;
+            }
+        }
+        else if (id === "A144") {
+            const myEmptyIndices = boardData.map((c, i) => (c && c.type === 'stone' && c.color === currentPlayer) ? i : -1).filter(i => i !== -1);
+            if (myEmptyIndices.length > 0) {
+                const targetIdx = myEmptyIndices[Math.floor(Math.random() * myEmptyIndices.length)];
+                const spawnCard = getCardById("0148");
+                if (spawnCard) {
+                    spawnCard.color = currentPlayer;
+                    boardData[targetIdx] = spawnCard;
+                    logDisplay.textContent = `⚡空のカードが「殺し屋」に変わった！`;
+                    renderBoard();
+                    if (isOnlineMode) pushGameStateToFirebase();
+                    await sleep(500);
+                }
+            } else {
+                logDisplay.textContent = `効果対象（自分の空のカード）なし`;
+                await sleep(1000);
+            }
+        }
+        else if (id === "A168") {
+            const hasKurapika = boardData.some(c => c && c.type === 'character' && c.color === currentPlayer && c.name === 'クラピカ');
+            if (hasKurapika) {
+                const etIds = ["0137", "0138", "0139", "0140"];
+                for (let i = 0; i < 4; i++) {
+                    if (hand[i]) {
+                        hand[i] = getCardById(etIds[Math.floor(Math.random() * etIds.length)]);
+                    }
+                }
+                handsChanged = true;
+                logDisplay.textContent = `⚡緋の眼が発現！手札が変化した！`;
+            } else {
+                logDisplay.textContent = `盤面にクラピカがいないため不発！`;
+                await sleep(1000);
+            }
+        }
+        else if (id === "A125") {
+            const oppDeck = opponentColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            oppDeck.filter(c => c && c.type === 'character').forEach(c => { c.atk = Math.max(0, c.atk - 3); });
+            logDisplay.textContent = `⚡相手のデッキをデバフ！`;
+        }
+        else if (id === "A202") {
+            const oppDeck = opponentColor === 'yellow' ? masterDecks.yellow : masterDecks.purple;
+            oppDeck.filter(c => c && c.type === 'character').forEach(c => { c.atk = Math.max(0, c.atk - 1); });
+            logDisplay.textContent = `⚡相手のデッキをデバフ！`;
+        }
     }
-    else if (id === "A201") {
-        drawCards(currentPlayer, 1); handsChanged = true;
-    }
-    
-    if (id === "A056") abilityIdForPending = "0056";
-    if (id === "A058") abilityIdForPending = "0058";
 
     if (handsChanged) {
         if (buffLog) logDisplay.textContent = `⚡手札に効果適用！`;
@@ -1366,8 +1490,6 @@ async function playActionCard(index) {
     updateHPUI(); updateHighlightsAndLines();
     window.isBoardSelecting = false;
     
-    await applyPendingChanges([], [], [], [], [], {id: abilityIdForPending});
-
     if (hpYellow <= 0 || hpPurple <= 0) { 
         if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
         await handleGameOver(); 
