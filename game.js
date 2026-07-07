@@ -2096,6 +2096,122 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
     }
 }
 
+async function placeStone(index) {
+    if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
+    const result = getFlippableAndTriggers(index, currentPlayer);
+    if (result.flippable.length === 0) return;
+    
+    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
+    const selectedCard = hand[window.selectedHandIndex];
+    if (!selectedCard) return;
+
+    window.isBoardSelecting = true;
+    
+    hand[window.selectedHandIndex] = null;
+    window.selectedHandIndex = null;
+    boardContainer.classList.add('tilted');
+    document.querySelectorAll('.highlight-box').forEach(el => el.remove());
+    if (svgGroup) svgGroup.innerHTML = '';
+    
+    boardData[index] = { ...selectedCard, color: currentPlayer };
+    renderBoard();
+    renderHands();
+    if (isOnlineMode) pushGameStateToFirebase();
+
+    try {
+        const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
+        const costStatus = checkCostStatus(selectedCard, currentPlayer);
+        let triggerMet = checkAbilityMet(selectedCard, index, result.flippable, currentPlayer);
+        
+        let finalCard = { ...selectedCard, color: currentPlayer };
+        
+        if (costStatus !== 'OK') {
+            finalCard.combo = null; 
+            finalCard.ability = null; 
+            result.triggers = [];
+            let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
+            let buffAmount = selectedCard.atk - orig;
+            if (isNaN(buffAmount)) buffAmount = 0;
+            finalCard.atk = Math.max(0, 1 + buffAmount); 
+        } else if (!triggerMet) {
+            finalCard.ability = null;
+        }
+
+        boardData[index] = finalCard;
+        await sleep(500);
+
+        let discardList = []; let returnList = []; let debuffList = []; let buffTargets = []; let sealTargets = [];
+
+        const abilityId = finalCard.stolenFromId || finalCard.id;
+
+        if (costStatus === 'OK' && triggerMet) {
+            if (abilityId === "0004" || abilityId === "0010" || abilityId === "0091" || abilityId === "0105") {
+                discardList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
+            }
+            if (abilityId === "0046" || abilityId === "0048" || abilityId === "0059" || abilityId === "0068") {
+                returnList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
+            }
+            if (abilityId === "0140") {
+                sealTargets = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を封じる相手の手札を選択', 'character');
+            }
+            if (abilityId === "0070") {
+                debuffList = await selectHandCardsTarget(currentPlayer, opponentColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
+            }
+            if (abilityId === "0002" || abilityId === "0031") {
+                buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
+            }
+            if (abilityId === "0028") {
+                const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
+                const chars = activeHand.filter(c => c && c.type === 'character');
+                buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
+            }
+            
+            if (selfDamageIds.includes(abilityId)) {
+                let { finalDamage: sDmg, reduction: sRed } = applyDamageReduction(2, 'special', currentPlayer);
+                if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
+                if (sDmg > 0) await showDamageAnimation(`-${sDmg}`, currentPlayer, 'normal');
+                logDisplay.textContent = `⚡[制約] 特殊ダメージを受けた！`;
+                updateHPUI();
+                await sleep(300);
+                if (hpYellow <= 0 || hpPurple <= 0) {
+                    if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
+                    await handleGameOver();
+                    window.isBoardSelecting = false;
+                    return;
+                }
+            }
+        }
+
+        const isGameOverCombat = await executeCombat(index, currentPlayer, finalCard, result);
+        if (isGameOverCombat) {
+            if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
+            await handleGameOver();
+            window.isBoardSelecting = false;
+            return;
+        }
+
+        await applyPendingChanges(discardList, returnList, debuffList, buffTargets, sealTargets, finalCard);
+
+    } catch (error) {
+        console.error("Combat Error:", error);
+    } finally {
+        window.isBoardSelecting = false;
+        
+        if (!isOnlineMode) {
+            checkGameOverAndChangeTurn();
+        } else {
+            if (hpYellow <= 0 || hpPurple <= 0 || !boardData.some(c => c === null)) {
+                if (!isGameOver) {
+                    pushGameStateToFirebase(currentPlayer);
+                    handleGameOver();
+                }
+            } else if (currentPlayer === myColor) {
+                pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
+            }
+        }
+    }
+}
+
 function startTurnTimer() {
     if (timerId) clearInterval(timerId); 
     const isMe = currentPlayer === myColor; 
