@@ -944,7 +944,7 @@ function createCardElementUI(card, index, playerColor, isHandCard = true) {
     return el;
 }
 
- updateHighlightsAndLines() {
+function updateHighlightsAndLines() {
     document.querySelectorAll('.highlight-box:not(.target-hl)').forEach(el => el.remove());
     if (svgGroup) svgGroup.innerHTML = '';
     
