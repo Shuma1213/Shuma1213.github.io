@@ -99,5 +99,16 @@ const CARD_DATABASE = [
     { id: "0038", rank: "a", type: "character", group: "287期受験生", nameTitle: "マジでいく長兄", name: "アモリ", cost: { specific: 1, free: 4 }, atk: 13,ability: { text: "自分の手札にあるランダムなキャラカード2枚のATKを+5する。" }, combo: { text: "特殊ダメージを8与える。" } },
     { id: "0155", rank: "a", type: "character", group: "287期受験生", nameTitle: "スケボー少年", name: "キルア", cost: { specific: 3, free: 2 }, atk: 18,ability: { text: "盤面に自分の「287期受験生」のキャラカードが他に3枚以上ある場合、特殊ダメージを5与える。" }, combo: { text: "特殊ダメージを10与える。" } },
     { id: "0156", rank: "a", type: "character", group: "287期受験生", nameTitle: "蜂の罠", name: "ポンズ", cost: { specific: 1, free: 0 }, atk: 9,ability: { text: "自分の手札にあるキャラカード1枚のATKを+3する。" }, combo: { text: "特殊ダメージを8与える。" } },
-    { id: "0012", rank: "a", type: "character", group: "287期受験生", nameTitle: "これが狩りだ！", name: "ポックル", cost: { specific: 0, free: 0 }, atk: 7,ability: { text: "自分の手札にあるランダムなキャラカード1枚のATKを+5する。" }, combo: { text: "特殊ダメージを7与える。" } }
+    { id: "0012", rank: "a", type: "character", group: "287期受験生", nameTitle: "これが狩りだ！", name: "ポックル", cost: { specific: 0, free: 0 }, atk: 7,ability: { text: "自分の手札にあるランダムなキャラカード1枚のATKを+5する。" }, combo: { text: "特殊ダメージを7与える。" } },
+    { id: "A126", rank: "ss", type: "action", group: "マフィアンコミュニティー", name: "因縁の対決", cost: { specific: 1, free: 0 }, atk: 0, ability: { text: "[制約]特殊ダメージを2受ける。念ダメージを6与える。" } },
+    { id: "A130", rank: "ss", type: "action", group: "マフィアンコミュニティー", name: "野の春", cost: { specific: 3, free: 2 }, atk: 0, ability: { text: "[誓約]自分のHPが60以下であれば発動。自分のHPを15回復する。" } },
+    { id: "A127", rank: "s", type: "action", group: "マフィアンコミュニティー", name: "かつての仕事仲間", cost: { specific: 1, free: 1 }, atk: 0, ability: { text: "盤面にある相手のGPコスト1以下のキャラカードを1枚選択し、空のカードにする。" } },
+    { id: "A128", rank: "s", type: "action", group: "マフィアンコミュニティー", name: "別にお前でも", cost: { specific: 3, free: 2 }, atk: 0, ability: { text: "[誓約]自分のHPが60以下であれば発動。相手の手札にあるGPコスト5以下のカードをランダムに1枚捨てる。" } },
+    { id: "A129", rank: "s", type: "action", group: "マフィアンコミュニティー", name: "180分の恋奴隷", cost: { specific: 1, free: 0 }, atk: 0, ability: { text: "[制約]特殊ダメージを2受ける。相手の手札にあるランダムなキャラカード1枚のATKを-10する。" } },
+    { id: "A144", rank: "s", type: "action", group: "マフィアンコミュニティー", name: "俺でなきゃ見逃しちゃうね", cost: { specific: 3, free: 0 }, atk: 0, ability: { text: "盤面にある自分の空のカードをランダムに1枚、「殺し屋/見逃さない眼力」にする。" } },
+    { id: "A168", rank: "s", type: "action", group: "マフィアンコミュニティー", name: "絶対時間", cost: { specific: 6, free: 1 }, atk: 0, ability: { text: "盤面に自分の「クラピカ」が1体以上いる場合、緋の眼が発現し、手札がすべて変化する。" } },
+    { id: "A125", rank: "a", type: "action", group: "マフィアンコミュニティー", name: "十老頭自慢の実行部隊「陰獣」", cost: { specific: 2, free: 2 }, atk: 0, ability: { text: "[制約]特殊ダメージを2受ける。相手のデッキにあるキャラカードすべてのATKを-3する。" } },
+    { id: "A202", rank: "a", type: "action", group: "マフィアンコミュニティー", name: "空っぽの金庫", cost: { specific: 2, free: 0 }, atk: 0, ability: { text: "[制約]特殊ダメージを2受ける。相手のデッキにあるキャラカードすべてのATKを-1する。" } },
+    { id: "A204", rank: "a", type: "action", group: "マフィアンコミュニティー", name: "何故 オレはまだ生きてるんだ!?", cost: { specific: 2, free: 0 }, atk: 0, ability: { text: "自分の手札にあるカードを1枚捨てる。" } },
+    { id: "A203", rank: "b", type: "action", group: "マフィアンコミュニティー", name: "駄作だぜ", cost: { specific: 1, free: 0 }, atk: 0, ability: { text: "カードを1枚引く。" } }
 ];
