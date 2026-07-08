@@ -41,7 +41,7 @@ animStyles.innerHTML = `
         height: 220%; 
         display: flex; 
         flex-direction: column; 
-        justify-content: flex-end; 
+        justify-content: center; 
         align-items: center; 
         opacity: 0; 
         transition: opacity 0.3s ease; 
@@ -356,6 +356,8 @@ function buildFixedDeck(deckType) {
     let deck = [];
     let ids = deckType === '287期受験生' ? 
         ["A043","A043","A044","A039","A040","A040","0002","0002","0010","0010","0004","0004","0156","0156","0003","0003","0012","0012","0031","0031","0017","0017","0023","0023","0032","0032","0036","0036","0016","0016"] :
+        ["A054","A054","A087","A087","A082","A082","0046","0046","0048","0048","0162","0162","0073","0073","0068","0068","0066","0066","0161","0161","0081","0081","0070","0070","0075","0075","0055","0055","0065","0065"] :
+        ["A054","A054","A087","A087","A082","A082","0046","0046","0048","0048","0162","0162","0073","0073","0068","0068","0066","0066","0161","0161","0081","0081","0070","0070","0075","0075","0055","0055","0065","0065"] :
         ["A054","A054","A087","A087","A082","A082","0046","0046","0048","0048","0162","0162","0073","0073","0068","0068","0066","0066","0161","0161","0081","0081","0070","0070","0075","0075","0055","0055","0065","0065"];
     ids.forEach(id => { const c = getCardById(id); if(c) deck.push(c); });
     shuffleDeck(deck); return deck;
@@ -583,7 +585,7 @@ window.startOfflineGame = function(selectedDeck) {
     botBadge.className = 'turn-badge ' + (isYouFirst ? 'badge-yellow' : 'badge-purple');
     topBadge.className = 'turn-badge ' + (isYouFirst ? 'badge-purple' : 'badge-yellow');
 
-    const oppDeckChoices = ['287期受験生', '幻影旅団'];
+    const oppDeckChoices = ['287期受験生', '幻影旅団','マフィアンコミュニティー～アグロ～','マフィアンコミュニティー～耐久～'];
     const oppDeck = oppDeckChoices[Math.floor(Math.random() * oppDeckChoices.length)];
 
     masterDecks = {
