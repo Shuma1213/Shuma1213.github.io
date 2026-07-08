@@ -1969,7 +1969,7 @@ function checkGameOverAndChangeTurn() {
     startTurn();
 }
 
-async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, sealTargets, finalCard) ;
+async function applyPendingChanges(discardList, returnList, debuffList, buffTargets, sealTargets, finalCard) {
     const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
     const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
     const oppHand = opponentColor === 'yellow' ? handYellow : handPurple;
