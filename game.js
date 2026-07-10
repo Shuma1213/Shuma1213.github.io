@@ -2247,7 +2247,7 @@ async function placeStone(index) {
 
     } catch (error) {
         console.error("Combat Error:", error);
-    } finaly {
+    } finally {
         window.isBoardSelecting = false;
         
         if (!isOnlineMode) {
