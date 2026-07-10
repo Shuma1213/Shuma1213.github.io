@@ -2666,6 +2666,14 @@ function renderBoard() {
 
         if (boardData[i] !== null && boardData[i] !== undefined) {
             const stone = document.createElement('div'); stone.classList.add('stone', boardData[i].color);
+        if (boardData[i].type === 'stone') stone.classList.add('card-stone');
+            else { 
+                stone.classList.add(`card-${boardData[i].type}`); 
+                applyCardImage(stone, boardData[i].id);
+                stone.innerHTML = `<div class="card-name card-text-node">${boardData[i].name || ''}</div>`; 
+            }
+            if(hasGlow) stone.classList.add('active-buff-glow');
+            cell.appendChild(stone);
             
             // レイヤーの構成
             const flatLayer = document.createElement('div');
