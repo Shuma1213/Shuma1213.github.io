@@ -3,12 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>アリバト風 6×6オセロ</title>
+    <title>HUNTER × HUTER ARENA BATTLE</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 </head>
 <body>
+<div id="title-screen" style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:9999; background:url('image/title.png') no-repeat center center / cover; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+    <h1 style="color:white; text-shadow:2px 2px 4px #000;">START</h1>
+</div>
+
+<div id="mode-select-overlay" style="display:none;">...</div>
 <div id="mode-select-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 30000; display: flex; justify-content: center; align-items: center;">
     <div class="deck-select-modal">
         <h2>プレイモードを選択</h2>
