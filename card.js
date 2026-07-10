@@ -129,5 +129,6 @@ const CARD_DATABASE = [
     { id: "0166", rank: "a", type: "character", group: "マフィアンコミュニティー", nameTitle: "スパイの実態", name: "スクワラ", cost: { specific: 4, free: 0 }, atk: 14, ability: { text: "[誓約]自分のHPが60以下であれば発動。念ダメージを10与える。" }, combo: { text: "念ダメージを9与える。" } },
     { id: "0167", rank: "a", type: "character", group: "マフィアンコミュニティー", nameTitle: "伝統文学の発現", name: "バショウ", cost: { specific: 3, free: 2 }, atk: 21, ability: { text: "[制約]特殊ダメージを2受ける。" }, combo: { text: "念ダメージを12与える。" } },
     { id: "0101", rank: "b", type: "character", group: "マフィアンコミュニティー", nameTitle: "護衛団の熱きリーダー", name: "ダルツォルネ", cost: { specific: 2, free: 1 }, atk: 17, ability: { text: "[制約]特殊ダメージを2受ける。" }, combo: { text: "念ダメージを11与える。" } },
-    { id: "0189", rank: "b", type: "character", group: "マフィアンコミュニティー", nameTitle: "見つけ出す鎖", name: "クラピカ", cost: { specific: 0, free: 0 }, atk: 0, combo: { text: "念ダメージを7与える。" } }
+    { id: "0189", rank: "b", type: "character", group: "マフィアンコミュニティー", nameTitle: "見つけ出す鎖", name: "クラピカ", cost: { specific: 0, free: 0 }, atk: 0, combo: { text: "念ダメージを7与える。" } },
+    { id: "0099", rank: "b", type: "character", group: "フリー", nameTitle: "自動操作人形", name: "風船黒子", cost: { specific: 0, free: 0 }, atk: 6, combo: { text: "念ダメージを2与える。" } }
 ];
