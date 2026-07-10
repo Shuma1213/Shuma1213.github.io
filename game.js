@@ -19,6 +19,14 @@ animStyles.innerHTML = `
     .card-discard-anim { transform: translateY(50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-return-anim { transform: translateY(-50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
+    /* コマの背景を完全に透明化（透過PNGを活かすため） */
+    .stone, .stone.card-stone, .layer-flat, .layer-tilted-base {
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    
     
     .fade-out-stone { opacity: 0 !important; transform: scale(0) !important; transition: all 1s ease-in-out !important; }
     .fade-out-stone .stone-standee { opacity: 0 !important; transition: opacity 1s ease-in-out !important; }
@@ -338,43 +346,54 @@ function applyStandeeImage(element, cardId) {
 }
 
 // 盤面のベースやキャラ画像を指定フォルダから取得する関数
+// 盤面のベースやキャラ画像を指定フォルダから取得する関数
 function applyPieceImage(stoneParent, layerElement, type, id, color, isFlat, fallbackName) {
     const suffix = color === 'yellow' ? 'y' : 'p';
-    const basePath = isFlat ? `Piece/base${suffix}.png` : `Piece/rad${suffix}.png`;
     
+    // 土台の背景と枠線を透明にする（透過を反映させるため）
+    stoneParent.style.backgroundColor = 'transparent';
+    stoneParent.style.border = 'none';
+    stoneParent.style.boxShadow = 'none';
+    layerElement.style.backgroundColor = 'transparent';
+
     if (type === 'stone') {
+        // 【キャラクターがいない空のコマ】
+        const basePath = isFlat ? `Piece/base${suffix}.png` : `Piece/rad${suffix}.png`;
         layerElement.style.backgroundImage = `url('${basePath}')`;
         layerElement.style.backgroundSize = 'contain';
         layerElement.style.backgroundPosition = 'center';
         layerElement.style.backgroundRepeat = 'no-repeat';
     } else {
-        const charPath = isFlat ? `Piece/${id}${suffix}.png` : `Piece/rad${suffix}.png`;
-        const img = new Image();
-        img.onload = () => {
-            layerElement.style.backgroundImage = `url('${charPath}')`;
-            layerElement.style.backgroundSize = 'contain';
-            layerElement.style.backgroundPosition = 'center';
-            layerElement.style.backgroundRepeat = 'no-repeat';
-            // PNG透過背景などを活かすため、元の背景やボーダーを消す
-            stoneParent.style.background = 'transparent';
-            stoneParent.style.border = 'none';
-            stoneParent.style.boxShadow = 'none';
-        };
-        img.onerror = () => {
-            if (isFlat) {
-                applyCardImage(stoneParent, id);
-                const nameEl = document.createElement('div');
-                nameEl.className = 'card-name card-text-node';
-                nameEl.textContent = fallbackName || '';
-                stoneParent.appendChild(nameEl);
-            } else {
-                layerElement.style.backgroundImage = `url('${basePath}')`;
+        // 【キャラクターがいるコマ】
+        if (isFlat) {
+            // 盤面が正面のとき：キャラ一体型画像（例：0073y.png）
+            const charPath = `Piece/${id}${suffix}.png`;
+            const img = new Image();
+            img.onload = () => {
+                layerElement.style.backgroundImage = `url('${charPath}')`;
                 layerElement.style.backgroundSize = 'contain';
                 layerElement.style.backgroundPosition = 'center';
                 layerElement.style.backgroundRepeat = 'no-repeat';
-            }
-        };
-        img.src = charPath;
+            };
+            img.onerror = () => {
+                // 万が一、専用画像が保存されていなかった場合の代用処理（元のカード画像表示）
+                applyCardImage(layerElement, id);
+                stoneParent.style.backgroundColor = '#222'; // 代用時のみ背景色を戻す
+                const nameEl = document.createElement('div');
+                nameEl.className = 'card-name card-text-node';
+                nameEl.textContent = fallbackName || '';
+                layerElement.appendChild(nameEl);
+            };
+            img.src = charPath;
+        } else {
+            // 盤面が斜めのとき：斜め用ベース画像（rady.pngなど）のみを土台に敷く
+            // （キャラクター自体はこの上のレイヤーで立ち上がります）
+            const basePath = `Piece/rad${suffix}.png`;
+            layerElement.style.backgroundImage = `url('${basePath}')`;
+            layerElement.style.backgroundSize = 'contain';
+            layerElement.style.backgroundPosition = 'center';
+            layerElement.style.backgroundRepeat = 'no-repeat';
+        }
     }
 }
 
