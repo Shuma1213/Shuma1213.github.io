@@ -2621,15 +2621,20 @@ window.toggleGPPool = function(playerCol) {
 // ====== タイトル画面からの遷移制御 ======
 document.addEventListener('DOMContentLoaded', () => {
     const titleScreen = document.getElementById('title-screen');
-    const modeOverlay = document.getElementById('mode-select-overlay'); // プレイモード選択画面
-    const deckOverlay = document.getElementById('deck-select-overlay'); // デッキ選択画面
+    const modeOverlay = document.getElementById('mode-select-overlay');
+    const deckOverlay = document.getElementById('deck-select-overlay');
 
+    // 【重要】ゲーム読み込み時に、タイトル画面以外を確実に非表示にする（重なり防止）
+    if (modeOverlay) modeOverlay.style.display = 'none';
+    if (deckOverlay) deckOverlay.style.display = 'none';
+
+    // タイトル画面をクリックした時の処理
     if (titleScreen) {
         titleScreen.addEventListener('click', function() {
-            // 1. クリックされたらタイトル画面を消す
+            // 1. タイトル画面を消す
             this.style.display = 'none';
             
-            // 2. 「プレイモード選択画面」を表示する
+            // 2. モード選択画面だけを表示する
             if (modeOverlay) {
                 modeOverlay.style.display = 'flex';
             }
