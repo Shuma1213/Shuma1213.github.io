@@ -33,6 +33,19 @@ animStyles.innerHTML = `
     .msg-win-yellow { font-size: 48px; color: #ffd700; text-shadow: 0 0 20px #b8860b; }
     .msg-lose-purple { font-size: 48px; color: #a843ff; text-shadow: 0 0 20px #4b0082; filter: grayscale(100%); }
 
+    /* ====== 盤面のコマ専用の新規レイヤー設定 ====== */
+    .layer-flat {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        opacity: 1; transition: opacity 0.3s ease; pointer-events: none; z-index: 1;
+    }
+    #board-container.tilted .layer-flat { opacity: 0; }
+
+    .layer-tilted-base {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        opacity: 0; transition: opacity 0.3s ease; pointer-events: none; z-index: 1;
+    }
+    #board-container.tilted .layer-tilted-base { opacity: 1; }
+
     .stone-standee { 
         position: absolute; 
         bottom: 5%; 
@@ -137,7 +150,6 @@ animStyles.innerHTML = `
     .cost-met-マフィアンコミュニティー { animation: pulse-mafia 1.2s infinite !important; background-color: rgba(241, 196, 15, 0.5) !important; color: #fff !important; }
     .cost-met-free { animation: pulse-free 1.2s infinite !important; background-color: rgba(255, 255, 255, 0.2) !important; color: #fff !important; }
 
-    /* 制約の自傷ダメージ用（赤文字表示） */
     .damage-popup.damage-self { color: #ff4d4d !important; text-shadow: 0 0 10px #aa0000 !important; }
 
     .card-name {
@@ -164,7 +176,6 @@ msgOverlay.id = 'center-msg-overlay';
 msgOverlay.className = 'center-message';
 document.body.appendChild(msgOverlay);
 
-// ネオンの占い用UI動的生成
 let fortuneOverlay = document.createElement('div');
 fortuneOverlay.id = 'fortune-overlay';
 fortuneOverlay.style.cssText = "display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 45000; flex-direction: column; align-items: center; justify-content: center;";
@@ -272,7 +283,6 @@ let lastDamageAnimTs = 0;
 let lastDamageRedTs = 0;
 let lastGpFlyTs = 0;
 
-// 自傷ダメージを受けるIDのリスト
 const selfDamageIds = ["0091", "0102", "0103", "0104", "0105", "0109", "0111", "0112", "0113", "0117", "0164", "0167", "0101"];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -325,6 +335,47 @@ function applyStandeeImage(element, cardId) {
         img2.src = path2;
     };
     img.src = path1;
+}
+
+// 盤面のベースやキャラ画像を指定フォルダから取得する関数
+function applyPieceImage(stoneParent, layerElement, type, id, color, isFlat, fallbackName) {
+    const suffix = color === 'yellow' ? 'y' : 'p';
+    const basePath = isFlat ? `Piece/base${suffix}.png` : `Piece/rad${suffix}.png`;
+    
+    if (type === 'stone') {
+        layerElement.style.backgroundImage = `url('${basePath}')`;
+        layerElement.style.backgroundSize = 'contain';
+        layerElement.style.backgroundPosition = 'center';
+        layerElement.style.backgroundRepeat = 'no-repeat';
+    } else {
+        const charPath = isFlat ? `Piece/${id}${suffix}.png` : `Piece/rad${suffix}.png`;
+        const img = new Image();
+        img.onload = () => {
+            layerElement.style.backgroundImage = `url('${charPath}')`;
+            layerElement.style.backgroundSize = 'contain';
+            layerElement.style.backgroundPosition = 'center';
+            layerElement.style.backgroundRepeat = 'no-repeat';
+            // PNG透過背景などを活かすため、元の背景やボーダーを消す
+            stoneParent.style.background = 'transparent';
+            stoneParent.style.border = 'none';
+            stoneParent.style.boxShadow = 'none';
+        };
+        img.onerror = () => {
+            if (isFlat) {
+                applyCardImage(stoneParent, id);
+                const nameEl = document.createElement('div');
+                nameEl.className = 'card-name card-text-node';
+                nameEl.textContent = fallbackName || '';
+                stoneParent.appendChild(nameEl);
+            } else {
+                layerElement.style.backgroundImage = `url('${basePath}')`;
+                layerElement.style.backgroundSize = 'contain';
+                layerElement.style.backgroundPosition = 'center';
+                layerElement.style.backgroundRepeat = 'no-repeat';
+            }
+        };
+        img.src = charPath;
+    }
 }
 
 function resetGameState() {
@@ -882,7 +933,6 @@ function closeHandSelection(overlay, resolve, selectedCards) {
     window.autoSelectAndResolve = null;
     resolve(selectedCards);
 }
-
 async function selectBoardTarget(validIndices) {
     window.isBoardTargeting = true;
     
@@ -2127,7 +2177,11 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
                 updateHPUI();
                 await sleep(300);
             }
-            effect.turnsLeft--;
+            
+            // 占いの残りターン管理
+            if (effect.type === 'neon_fortune') {
+                effect.turnsLeft--;
+            }
         }
     }
     activeEffects = activeEffects.filter(e => e.turnsLeft > 0);
@@ -2146,122 +2200,6 @@ async function applyPendingChanges(discardList, returnList, debuffList, buffTarg
         renderHands();
         if (isOnlineMode) pushGameStateToFirebase();
         await sleep(500);
-    }
-}
-
-async function placeStone(index) {
-    if (window.isBoardSelecting || window.isBoardTargeting || window.selectedHandIndex == null) return;
-    const result = getFlippableAndTriggers(index, currentPlayer);
-    if (result.flippable.length === 0) return;
-    
-    const hand = currentPlayer === 'yellow' ? handYellow : handPurple;
-    const selectedCard = hand[window.selectedHandIndex];
-    if (!selectedCard) return;
-
-    window.isBoardSelecting = true;
-    
-    hand[window.selectedHandIndex] = null;
-    window.selectedHandIndex = null;
-    boardContainer.classList.add('tilted');
-    document.querySelectorAll('.highlight-box').forEach(el => el.remove());
-    if (svgGroup) svgGroup.innerHTML = '';
-    
-    boardData[index] = { ...selectedCard, color: currentPlayer };
-    renderBoard();
-    renderHands();
-    if (isOnlineMode) pushGameStateToFirebase();
-
-    try {
-        const opponentColor = currentPlayer === 'yellow' ? 'purple' : 'yellow';
-        const costStatus = checkCostStatus(selectedCard, currentPlayer);
-        let triggerMet = checkAbilityMet(selectedCard, index, result.flippable, currentPlayer);
-        
-        let finalCard = { ...selectedCard, color: currentPlayer };
-        
-        if (costStatus !== 'OK') {
-            finalCard.combo = null; 
-            finalCard.ability = null; 
-            result.triggers = [];
-            let orig = selectedCard.original_atk !== undefined ? selectedCard.original_atk : selectedCard.atk;
-            let buffAmount = selectedCard.atk - orig;
-            if (isNaN(buffAmount)) buffAmount = 0;
-            finalCard.atk = Math.max(0, 1 + buffAmount); 
-        } else if (!triggerMet) {
-            finalCard.ability = null;
-        }
-
-        boardData[index] = finalCard;
-        await sleep(500);
-
-        let discardList = []; let returnList = []; let debuffList = []; let buffTargets = []; let sealTargets = [];
-
-        const abilityId = finalCard.stolenFromId || finalCard.id;
-
-        if (costStatus === 'OK' && triggerMet) {
-            if (abilityId === "0004" || abilityId === "0010" || abilityId === "0091" || abilityId === "0105") {
-                discardList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '捨てるカードを選択してください', 'all');
-            }
-            if (abilityId === "0046" || abilityId === "0048" || abilityId === "0059" || abilityId === "0068") {
-                returnList = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, 'デッキに戻すカードを選択してください', 'all');
-            }
-            if (abilityId === "0140") {
-                sealTargets = await selectHandCardsTarget(currentPlayer, opponentColor, 1, '能力を封じる相手の手札を選択', 'character');
-            }
-            if (abilityId === "0070") {
-                debuffList = await selectHandCardsTarget(currentPlayer, opponentColor, 1, 'ATKを下げる相手の手札を選択', 'debuff');
-            }
-            if (abilityId === "0002" || abilityId === "0031" || abilityId === "0155") {
-                buffTargets = await selectHandCardsTarget(currentPlayer, currentPlayer, 1, '強化するキャラを選択', 'character');
-            }
-            if (abilityId === "0028") {
-                const activeHand = currentPlayer === 'yellow' ? handYellow : handPurple;
-                const chars = activeHand.filter(c => c && c.type === 'character');
-                buffTargets = chars.sort(() => 0.5 - Math.random()).slice(0, 2);
-            }
-            
-            if (selfDamageIds.includes(abilityId)) {
-                let { finalDamage: sDmg } = applyDamageReduction(2, 'special', currentPlayer);
-                if (currentPlayer === 'yellow') hpYellow -= sDmg; else hpPurple -= sDmg;
-                if (sDmg > 0) await showDamageAnimation(`${sDmg}`, currentPlayer, 'damage-self');
-                logDisplay.textContent = `⚡[制約] 特殊ダメージを受けた！`;
-                updateHPUI();
-                await sleep(300);
-                if (hpYellow <= 0 || hpPurple <= 0) {
-                    if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
-                    await handleGameOver();
-                    window.isBoardSelecting = false;
-                    return;
-                }
-            }
-        }
-
-        const isGameOverCombat = await executeCombat(index, currentPlayer, finalCard, result);
-        if (isGameOverCombat) {
-            if (isOnlineMode) pushGameStateToFirebase(currentPlayer);
-            await handleGameOver();
-            window.isBoardSelecting = false;
-            return;
-        }
-
-        await applyPendingChanges(discardList, returnList, debuffList, buffTargets, sealTargets, finalCard);
-
-    } catch (error) {
-        console.error("Combat Error:", error);
-    } finally {
-        window.isBoardSelecting = false;
-        
-        if (!isOnlineMode) {
-            checkGameOverAndChangeTurn();
-        } else {
-            if (hpYellow <= 0 || hpPurple <= 0 || !boardData.some(c => c === null)) {
-                if (!isGameOver) {
-                    pushGameStateToFirebase(currentPlayer);
-                    handleGameOver();
-                }
-            } else if (currentPlayer === myColor) {
-                pushGameStateToFirebase(currentPlayer === 'yellow' ? 'purple' : 'yellow');
-            }
-        }
     }
 }
 
@@ -2307,7 +2245,7 @@ function startTurnTimer() {
     }, 1000);
 }
 
-// 占い実行ロジック
+// ====== 占い実行ロジック ======
 async function runFortuneTelling(player, maxDiscards) {
     if (player !== myColor) return; 
     const deck = player === 'yellow' ? masterDecks.yellow : masterDecks.purple;
@@ -2331,9 +2269,10 @@ async function runFortuneTelling(player, maxDiscards) {
             const discarded = deck.pop(); 
             if (player === 'yellow') discardYellow.push(discarded); else discardPurple.push(discarded);
             logDisplay.textContent = `🔮 占いで「${discarded.name}」を捨てた`;
+            // 次のカードへループ継続
         } else {
             logDisplay.textContent = `🔮 占いでカードを引くことにした`;
-            break; 
+            break; // 引く場合は占い終了
         }
     }
     document.getElementById('fortune-overlay').style.display = 'none';
@@ -2611,14 +2550,18 @@ function renderBoard() {
 
         if (boardData[i] !== null && boardData[i] !== undefined) {
             const stone = document.createElement('div'); stone.classList.add('stone', boardData[i].color);
-            if (boardData[i].type === 'stone') stone.classList.add('card-stone');
-            else { 
-                stone.classList.add(`card-${boardData[i].type}`); 
-                applyCardImage(stone, boardData[i].id);
-                stone.innerHTML = `<div class="card-name card-text-node">${boardData[i].name || ''}</div>`; 
-            }
-            if(hasGlow) stone.classList.add('active-buff-glow');
-            cell.appendChild(stone);
+            
+            // レイヤーの構成
+            const flatLayer = document.createElement('div');
+            flatLayer.className = 'layer-flat';
+            applyPieceImage(stone, flatLayer, boardData[i].type, boardData[i].id, boardData[i].color, true, boardData[i].name);
+            
+            const tiltedBase = document.createElement('div');
+            tiltedBase.className = 'layer-tilted-base';
+            applyPieceImage(stone, tiltedBase, boardData[i].type, boardData[i].id, boardData[i].color, false, boardData[i].name);
+
+            stone.appendChild(flatLayer);
+            stone.appendChild(tiltedBase);
 
             if (boardData[i].type === 'character') {
                 const standee = document.createElement('div');
@@ -2632,6 +2575,9 @@ function renderBoard() {
                 standee.appendChild(standeeImg);
                 stone.appendChild(standee); 
             }
+
+            if(hasGlow) stone.classList.add('active-buff-glow');
+            cell.appendChild(stone);
 
         } else if (hasGlow) {
             cell.classList.add('active-buff-glow'); 
@@ -2722,3 +2668,4 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
