@@ -2618,17 +2618,21 @@ window.toggleGPPool = function(playerCol) {
     document.getElementById(footerId).textContent = `残りデッキ ${deckLen}枚 / 捨て場 C:${dChar} A:${dAct}`;
     panel.style.display = 'flex';
 };
-// タイトル画面をクリックした時の処理
-document.getElementById('title-screen').addEventListener('click', function() {
-    // タイトル画面を消す
-    this.style.display = 'none';
-    
-    // モード選択画面を表示する
-    // （既存のIDが 'mode-select-overlay' だと仮定しています）
-    const modeOverlay = document.getElementById('mode-select-overlay');
-    if (modeOverlay) {
-        modeOverlay.style.display = 'flex';
-    } else {
-        console.error("mode-select-overlay が見つかりません");
+// ====== タイトル画面からの遷移制御 ======
+document.addEventListener('DOMContentLoaded', () => {
+    const titleScreen = document.getElementById('title-screen');
+    const modeOverlay = document.getElementById('mode-select-overlay'); // プレイモード選択画面
+    const deckOverlay = document.getElementById('deck-select-overlay'); // デッキ選択画面
+
+    if (titleScreen) {
+        titleScreen.addEventListener('click', function() {
+            // 1. クリックされたらタイトル画面を消す
+            this.style.display = 'none';
+            
+            // 2. 「プレイモード選択画面」を表示する
+            if (modeOverlay) {
+                modeOverlay.style.display = 'flex';
+            }
+        });
     }
 });
