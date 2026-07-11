@@ -76,44 +76,53 @@ animStyles.innerHTML = `
         transform-origin: bottom center;
     }
 
+        /* ★1. 手札カードの枠や背景を消し、透過画像を活かす */
     .hand-card { 
         border-radius: 50% !important; 
-        border: 2px solid #ccc !important; 
-        background-color: #222 !important;
-        width: 80px !important;
-        height: 80px !important;
+        border: none !important; /* グレーの枠線を削除 */
+        background-color: transparent !important; /* 黒い背景色を削除 */
+        width: 85px !important; /* 少し大きめに調整 */
+        height: 85px !important;
         overflow: visible !important; 
+        box-shadow: 0 4px 8px rgba(0,0,0,0.5) !important; /* 枠の代わりに自然な影をつける */
     }
     .hand-card.card-action { 
         border-radius: 10px !important; 
         clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%) !important; 
         border-color: #a843ff !important;
     }
+
+    /* ★2. カードの名前テキストを非表示にする（画像だけを見せるため） */
+    .hand-card .card-name {
+        display: none !important;
+    }
     
+    /* ★3. ATKバッジを「上部中央」へ配置（理想画像に合わせる） */
     .card-atk-badge { 
         position: absolute; 
-        top: -6px !important; 
-        right: -6px !important; 
-        left: auto !important; 
-        transform: rotate(45deg) !important; 
-        width: 28px !important; 
-        height: 28px !important; 
+        top: -10px !important; /* 上にはみ出させる */
+        left: 50% !important; /* 左から50%の位置 */
+        right: auto !important; 
+        transform: translateX(-50%) rotate(45deg) !important; /* 自身の半分のサイズだけ左に戻して真ん中に */
+        width: 30px !important; 
+        height: 30px !important; 
         background: linear-gradient(135deg, #00d2ff, #0055ff) !important; 
-        border: 1.5px solid #fff !important; 
+        border: 2px solid #fff !important; 
         z-index: 4 !important; 
         box-shadow: 0 3px 5px rgba(0,0,0,0.7) !important;
     }
     .card-atk-badge.debuffed { background: linear-gradient(135deg, #9c27b0, #4b0082) !important; }
     .card-atk-badge.buffed { background: linear-gradient(135deg, #ff9800, #ff5722) !important; }
     
+    /* ATKの数値（バッジと同じように上部中央へ） */
     .card-atk-text { 
         position: absolute; 
-        top: -2px !important; 
-        right: -5px !important; 
-        left: auto !important; 
-        width: 28px;
+        top: -4px !important; 
+        left: 50% !important; 
+        right: auto !important; 
+        transform: translateX(-50%) !important; 
+        width: 30px;
         text-align: center;
-        transform: none !important; 
         font-size: 16px !important; 
         font-weight: 900 !important; 
         color: #fff !important; 
@@ -121,15 +130,17 @@ animStyles.innerHTML = `
         text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 6px #00d2ff !important; 
     }
     
+    /* ★4. コスト（GP）の丸アイコンを左上に配置 */
     .cost-container { 
         position: absolute; 
-        top: -5px !important; 
-        left: -5px !important; 
+        top: 5px !important; 
+        left: -12px !important; 
         display: flex; 
         flex-direction: column; 
-        gap: 0px !important; 
+        gap: 2px !important; 
         z-index: 6; 
     }
+
     .badge-specific, .badge-free {
         border-radius: 50% !important; 
         width: 22px !important; 
