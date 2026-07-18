@@ -31,6 +31,32 @@
     </div>
 </div>
 
+<!-- デッキ内訳確認画面（新規追加） -->
+<div id="deck-detail-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0b0b13; z-index: 25000; flex-direction: column; align-items: center; overflow-y: auto;">
+    <div style="width: 100%; max-width: 450px; padding-bottom: 20px;">
+        <!-- ヘッダー -->
+        <div style="background: linear-gradient(to right, #8b0000, #4a0000); padding: 10px; text-align: center; border: 2px solid #b8860b; margin: 10px; font-weight: bold; font-size: 20px; color: white;">
+            <span id="detail-deck-name">デッキ名</span>
+        </div>
+        
+        <!-- アクション -->
+        <div style="text-align: center; color: white; border-top: 1px solid #b8860b; border-bottom: 1px solid #b8860b; background: rgba(184, 134, 11, 0.2); padding: 5px; margin: 10px 0; font-weight: bold; letter-spacing: 2px;">アクション</div>
+        <div id="detail-action-grid" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; padding: 0 10px;"></div>
+        
+        <!-- キャラクター -->
+        <div style="text-align: center; color: white; border-top: 1px solid #b8860b; border-bottom: 1px solid #b8860b; background: rgba(184, 134, 11, 0.2); padding: 5px; margin: 10px 0; font-weight: bold; letter-spacing: 2px;">キャラクター</div>
+        <div id="detail-character-grid" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; padding: 0 10px;"></div>
+        
+        <!-- ボタン -->
+        <div style="display: flex; justify-content: space-between; padding: 20px 10px; align-items: flex-end; margin-top: 20px;">
+            <button class="deck-btn" style="width: 30%; background: #555; font-size: 14px; border: 2px solid #fff;" onclick="backToDeckSelect()">BACK</button>
+            <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #00d2ff, #0055ff); clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); display: flex; align-items: center; justify-content: center; text-align: center; font-size: 16px; font-weight: bold; color: white; cursor: pointer; border: 2px solid #fff; text-shadow: 0 0 10px #fff; box-shadow: 0 0 20px #00d2ff;" onclick="confirmDeckAndStart()"><span style="transform: translateY(-5px);">VS<br>開始</span></div>
+            <div style="width: 30%;"></div>
+        </div>
+    </div>
+</div>
+
+    
 <div id="room-select-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; justify-content: center; align-items: center;">
     <div class="deck-select-modal">
         <h2>オンライン対戦</h2>
