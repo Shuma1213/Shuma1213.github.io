@@ -19,6 +19,17 @@ animStyles.innerHTML = `
     .card-discard-anim { transform: translateY(50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-return-anim { transform: translateY(-50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
+        /* デッキ確認画面用のスタイル */
+    .detail-card-wrapper { position: relative; width: 100%; aspect-ratio: 1; margin-bottom: 15px; }
+    .detail-card-inner { width: 100%; height: 100%; border-radius: 50%; border: 1.5px solid #777; background-color: #222; background-size: cover; background-position: center; position: relative; }
+    .detail-card-inner.card-action { border-radius: 8px; clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); border-color: #a843ff; }
+    .detail-atk-badge { position: absolute; top: -5px; left: -5px; width: 22px; height: 22px; background: linear-gradient(135deg, #00d2ff, #0055ff); border: 1.5px solid #fff; z-index: 4; transform: rotate(45deg); box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+    .detail-atk-text { position: absolute; top: -3px; left: -5px; width: 22px; text-align: center; font-size: 13px; font-weight: 900; color: #fff; z-index: 5; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
+    .detail-cost-box { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); border: 1px solid #aaa; border-radius: 3px; padding: 1px 4px; display: flex; gap: 2px; z-index: 6; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.5);}
+    .detail-cost-text { font-size: 11px; font-weight: bold; }
+    .detail-cost-red { color: #ff4d4d; }
+    .detail-cost-white { color: #fff; }
+
     /* コマの背景を完全に透明化（透過PNGを活かすため） */
     .stone, .stone.card-stone, .layer-flat, .layer-tilted-base {
         background-color: transparent !important;
@@ -488,17 +499,86 @@ window.selectMode = function(mode) {
     document.getElementById('deck-select-overlay').style.display = 'flex';
 };
 
+// 確認画面用にシャッフルなし・ソート済みのデッキリストを取得
+function getDeckListForDetail(deckType) {
+    let ids = [];
+    if (deckType === '287期受験生') ids = ["A043","A043","A044","A039","A040","A040","0002","0002","0010","0010","0004","0004","0155","0155","0003","0003","0156","0156","0031","0031","0017","0017","0023","0023","0032","0032","0036","0036","0016","0016"];
+    else if (deckType === '幻影旅団') ids = ["A054","A054","A087","A087","A082","A082","0046","0046","0048","0048","0162","0162","0073","0073","0068","0068","0066","0066","0161","0161","0081","0081","0070","0070","0075","0075","0055","0055","0065","0065"];
+    else if (deckType === 'マフィアンコミュニティー～アグロ～') ids = ["A126","A126","A144","A127","A127","A144","0091","0091","0105","0105","0104","0104","0106","0106","0120","0120","0096","0096","0109","0109","0112","0112","0101","0101","0166","0166","0115","0115","0123","0123"];
+    else if (deckType === 'マフィアンコミュニティー～耐久～') ids = ["A130","A130","A129","A129","A168","A168","0091","0091","0105","0105","0089","0089","0189","0189","0120","0120","0121","0121","0108","0108","0109","0109","0119","0119","0097","0097","0166","0166","0115","0115"];
+    
+    let deck = [];
+    ids.forEach(id => { const c = getCardById(id); if(c) deck.push(c); });
+    
+    // アクション→キャラの順、さらにコスト順に綺麗にソート
+    deck.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'action' ? -1 : 1;
+        const costA = (a.cost?.specific || 0) + (a.cost?.free || 0);
+        const costB = (b.cost?.specific || 0) + (b.cost?.free || 0);
+        if (costA !== costB) return costA - costB;
+        return a.id.localeCompare(b.id);
+    });
+    return deck;
+}
+
+// デッキ選択時の処理を「詳細画面の表示」に変更
 window.selectDeck = function(deckName) {
     myDeckChoice = deckName;
     document.getElementById('deck-select-overlay').style.display = 'none';
     
+    document.getElementById('detail-deck-name').textContent = deckName;
+    const actionGrid = document.getElementById('detail-action-grid');
+    const charGrid = document.getElementById('detail-character-grid');
+    actionGrid.innerHTML = '';
+    charGrid.innerHTML = '';
+    
+    const deck = getDeckListForDetail(deckName);
+    deck.forEach(card => {
+        const wrap = document.createElement('div');
+        wrap.className = 'detail-card-wrapper';
+        
+        const inner = document.createElement('div');
+        inner.className = `detail-card-inner ${card.type === 'action' ? 'card-action' : ''}`;
+        applyCardImage(inner, card.id);
+        wrap.appendChild(inner);
+        
+        if (card.type === 'character') {
+            const badge = document.createElement('div'); badge.className = 'detail-atk-badge'; wrap.appendChild(badge);
+            const text = document.createElement('div'); text.className = 'detail-atk-text'; text.textContent = card.atk; wrap.appendChild(text);
+        }
+        
+        const costBox = document.createElement('div'); costBox.className = 'detail-cost-box';
+        const spec = card.cost?.specific || 0;
+        const free = card.cost?.free || 0;
+        if (spec > 0) costBox.innerHTML += `<span class="detail-cost-text detail-cost-red">♦${spec}</span>`;
+        if (free > 0) costBox.innerHTML += `<span class="detail-cost-text detail-cost-white">♦${free}</span>`;
+        if (spec === 0 && free === 0) costBox.innerHTML += `<span class="detail-cost-text detail-cost-red">♦0</span>`;
+        wrap.appendChild(costBox);
+        
+        if (card.type === 'action') actionGrid.appendChild(wrap);
+        else charGrid.appendChild(wrap);
+    });
+    
+    document.getElementById('deck-detail-overlay').style.display = 'flex';
+};
+
+// 詳細画面から戻る処理
+window.backToDeckSelect = function() {
+    document.getElementById('deck-detail-overlay').style.display = 'none';
+    document.getElementById('deck-select-overlay').style.display = 'flex';
+}
+
+// 詳細画面からゲーム・ルームへ進む処理
+window.confirmDeckAndStart = function() {
+    document.getElementById('deck-detail-overlay').style.display = 'none';
     if (isOnlineMode) {
-        document.getElementById('selected-deck-name').textContent = deckName;
+        document.getElementById('selected-deck-name').textContent = myDeckChoice;
         document.getElementById('room-select-overlay').style.display = 'flex';
     } else {
-        startOfflineGame(deckName);
+        startOfflineGame(myDeckChoice);
     }
 };
+
 
 window.createRoom = function() {
     resetGameState();
