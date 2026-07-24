@@ -18,37 +18,13 @@ animStyles.innerHTML = `
     .card-discard-anim { transform: translateY(50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-return-anim { transform: translateY(-50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
-        /* デッキ確認画面用のスタイル */
-    /* デッキ確認画面用のスタイル（枠なし・透過そのまま） */
-    <!-- デッキ内訳確認画面（スマホ1画面収容版・はみ出し防止） -->
-<div id="deck-detail-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0b0b13; z-index: 25000; flex-direction: column; align-items: center; justify-content: space-between; box-sizing: border-box; padding: 10px 5px; overflow: hidden;">
-    <div style="width: 100%; max-width: 450px; display: flex; flex-direction: column; height: 100%; justify-content: space-between; box-sizing: border-box;">
-        <!-- 上部エリア -->
-        <div style="width: 100%; box-sizing: border-box;">
-            <!-- ヘッダー -->
-            <div style="background: linear-gradient(to right, #8b0000, #4a0000); padding: 6px; text-align: center; border: 1.5px solid #b8860b; font-weight: bold; font-size: 16px; color: white; margin-bottom: 6px;">
-                <span id="detail-deck-name">デッキ名</span>
-            </div>
-            
-            <!-- アクション -->
-            <div style="text-align: center; color: #ffd700; border-top: 1px solid #b8860b; border-bottom: 1px solid #b8860b; background: rgba(184, 134, 11, 0.2); padding: 2px; margin: 4px 0; font-weight: bold; font-size: 12px; letter-spacing: 1px;">アクション</div>
-            <!-- ★ minmax(0, 1fr) と width: 100% を追加して画面外への押し出しを防止 -->
-            <div id="detail-action-grid" style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 0 2px; width: 100%; box-sizing: border-box;"></div>
-            
-            <!-- キャラクター -->
-            <div style="text-align: center; color: #ffd700; border-top: 1px solid #b8860b; border-bottom: 1px solid #b8860b; background: rgba(184, 134, 11, 0.2); padding: 2px; margin: 8px 0 4px 0; font-weight: bold; font-size: 12px; letter-spacing: 1px;">キャラクター</div>
-            <!-- ★ minmax(0, 1fr) と width: 100% を追加して画面外への押し出しを防止 -->
-            <div id="detail-character-grid" style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 0 2px; width: 100%; box-sizing: border-box;"></div>
-        </div>
-        
-        <!-- 下部ボタン -->
-        <div style="display: flex; justify-content: space-between; padding: 5px 10px 10px 10px; align-items: center; width: 100%; box-sizing: border-box;">
-            <button class="deck-btn" style="width: 28%; height: 38px; background: #444; font-size: 12px; border: 1.5px solid #fff; padding: 0;" onclick="backToDeckSelect()">BACK</button>
-            <div style="width: 62px; height: 65px; background: linear-gradient(135deg, #00d2ff, #0055ff); clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); display: flex; align-items: center; justify-content: center; text-align: center; font-size: 13px; font-weight: bold; color: white; cursor: pointer; border: 1.5px solid #fff; text-shadow: 0 0 8px #fff; box-shadow: 0 0 15px #00d2ff;" onclick="confirmDeckAndStart()"><span style="transform: translateY(-2px);">VS<br>開始</span></div>
-            <div style="width: 28%;"></div>
-        </div>
-    </div>
-</div>
+       /* デッキ確認画面用のスタイル（枠なし・透過そのまま・はみ出し防止） */
+    .detail-card-wrapper { position: relative; width: 100%; min-width: 0; aspect-ratio: 1; display: flex; justify-content: center; align-items: center; margin-bottom: 8px; }
+    .detail-card-inner { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; border: none !important; background-color: transparent !important; }
+    
+    /* コストボックス全体を少し縮小(scale)させて、横幅をはみ出させないようにする */
+    .detail-cost-box { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%) scale(0.85); transform-origin: bottom center; background: rgba(0,0,0,0.85); border: 1px solid #555; border-radius: 3px; padding: 0px 3px; display: flex; gap: 2px; z-index: 6; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+    .detail-cost-text { font-size: 10px; font-weight: bold; }
 
     /* コマの背景を完全に透明化（透過PNGを活かすため） */
     .stone, .stone.card-stone, .layer-flat, .layer-tilted-base {
