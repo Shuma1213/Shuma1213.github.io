@@ -19,15 +19,11 @@ animStyles.innerHTML = `
     .card-return-anim { transform: translateY(-50px) scale(0.5) !important; opacity: 0 !important; transition: all 0.5s ease; pointer-events: none;}
     .card-debuff-anim { box-shadow: 0 0 15px 5px #9c27b0 !important; transition: all 0.5s ease; }
         /* デッキ確認画面用のスタイル */
-    .detail-card-wrapper { position: relative; width: 100%; aspect-ratio: 1; margin-bottom: 15px; }
-    .detail-card-inner { width: 100%; height: 100%; border-radius: 50%; border: 1.5px solid #777; background-color: #222; background-size: cover; background-position: center; position: relative; }
-    .detail-card-inner.card-action { border-radius: 8px; clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); border-color: #a843ff; }
-    .detail-atk-badge { position: absolute; top: -5px; left: -5px; width: 22px; height: 22px; background: linear-gradient(135deg, #00d2ff, #0055ff); border: 1.5px solid #fff; z-index: 4; transform: rotate(45deg); box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-    .detail-atk-text { position: absolute; top: -3px; left: -5px; width: 22px; text-align: center; font-size: 13px; font-weight: 900; color: #fff; z-index: 5; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
-    .detail-cost-box { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); border: 1px solid #aaa; border-radius: 3px; padding: 1px 4px; display: flex; gap: 2px; z-index: 6; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.5);}
-    .detail-cost-text { font-size: 11px; font-weight: bold; }
-    .detail-cost-red { color: #ff4d4d; }
-    .detail-cost-white { color: #fff; }
+    /* デッキ確認画面用のスタイル（枠なし・透過そのまま） */
+    .detail-card-wrapper { position: relative; width: 100%; aspect-ratio: 1; display: flex; justify-content: center; align-items: center; margin-bottom: 6px; }
+    .detail-card-inner { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; border: none !important; background-color: transparent !important; }
+    .detail-cost-box { position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); border: 1px solid #555; border-radius: 3px; padding: 0px 3px; display: flex; gap: 2px; z-index: 6; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+    .detail-cost-text { font-size: 10px; font-weight: bold; }
 
     /* コマの背景を完全に透明化（透過PNGを活かすため） */
     .stone, .stone.card-stone, .layer-flat, .layer-tilted-base {
@@ -498,6 +494,14 @@ window.selectMode = function(mode) {
     document.getElementById('deck-select-overlay').style.display = 'flex';
 };
 
+/// グループイメージカラーの取得
+function getGroupColor(group) {
+    if (group === '287期受験生') return '#2ecc71'; // 緑
+    if (group === '幻影旅団') return '#a843ff'; // 紫
+    if (group === 'マフィアンコミュニティー') return '#f1c40f'; // 黄
+    return '#ffffff'; // 白
+}
+
 // 確認画面用にシャッフルなし・ソート済みのデッキリストを取得
 function getDeckListForDetail(deckType) {
     let ids = [];
@@ -509,7 +513,6 @@ function getDeckListForDetail(deckType) {
     let deck = [];
     ids.forEach(id => { const c = getCardById(id); if(c) deck.push(c); });
     
-    // アクション→キャラの順、さらにコスト順に綺麗にソート
     deck.sort((a, b) => {
         if (a.type !== b.type) return a.type === 'action' ? -1 : 1;
         const costA = (a.cost?.specific || 0) + (a.cost?.free || 0);
@@ -520,7 +523,7 @@ function getDeckListForDetail(deckType) {
     return deck;
 }
 
-// デッキ選択時の処理を「詳細画面の表示」に変更
+// デッキ選択時の処理
 window.selectDeck = function(deckName) {
     myDeckChoice = deckName;
     document.getElementById('deck-select-overlay').style.display = 'none';
@@ -537,21 +540,28 @@ window.selectDeck = function(deckName) {
         wrap.className = 'detail-card-wrapper';
         
         const inner = document.createElement('div');
-        inner.className = `detail-card-inner ${card.type === 'action' ? 'card-action' : ''}`;
+        inner.className = 'detail-card-inner';
         applyCardImage(inner, card.id);
         wrap.appendChild(inner);
         
-        if (card.type === 'character') {
-            const badge = document.createElement('div'); badge.className = 'detail-atk-badge'; wrap.appendChild(badge);
-            const text = document.createElement('div'); text.className = 'detail-atk-text'; text.textContent = card.atk; wrap.appendChild(text);
-        }
+        // コスト表示設定
+        const costBox = document.createElement('div'); 
+        costBox.className = 'detail-cost-box';
         
-        const costBox = document.createElement('div'); costBox.className = 'detail-cost-box';
         const spec = card.cost?.specific || 0;
         const free = card.cost?.free || 0;
-        if (spec > 0) costBox.innerHTML += `<span class="detail-cost-text detail-cost-red">♦${spec}</span>`;
-        if (free > 0) costBox.innerHTML += `<span class="detail-cost-text detail-cost-white">♦${free}</span>`;
-        if (spec === 0 && free === 0) costBox.innerHTML += `<span class="detail-cost-text detail-cost-red">♦0</span>`;
+        const groupColor = getGroupColor(card.group);
+        
+        if (spec === 0 && free === 0) {
+            costBox.innerHTML = `<span class="detail-cost-text" style="color:#ffffff;">♦0</span>`;
+        } else {
+            if (spec > 0) {
+                costBox.innerHTML += `<span class="detail-cost-text" style="color:${groupColor};">♦${spec}</span>`;
+            }
+            if (free > 0) {
+                costBox.innerHTML += `<span class="detail-cost-text" style="color:#ffffff;">♦${free}</span>`;
+            }
+        }
         wrap.appendChild(costBox);
         
         if (card.type === 'action') actionGrid.appendChild(wrap);
@@ -577,7 +587,6 @@ window.confirmDeckAndStart = function() {
         startOfflineGame(myDeckChoice);
     }
 };
-
 
 window.createRoom = function() {
     resetGameState();
